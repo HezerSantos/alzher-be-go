@@ -1,0 +1,10 @@
+# Go
+tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Environment
+.env
