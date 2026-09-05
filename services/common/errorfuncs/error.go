@@ -1,4 +1,4 @@
-package errors
+package errorfuncs
 
 import (
 	"fmt"
@@ -41,5 +41,4 @@ func UnauthorizedError(c *gin.Context) {
 			Json:    JsonResponseType{Code: "INVALID_ACCESS", Msg: "Unauthorized"},
 		},
 	)
-	return
 }

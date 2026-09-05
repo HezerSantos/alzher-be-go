@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/HezerSantos/alzher-api/services/common/argon"
-	"github.com/HezerSantos/alzher-api/services/common/errors"
+	"github.com/HezerSantos/alzher-api/services/common/errorfuncs"
 	"github.com/HezerSantos/alzher-api/services/common/jwt"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
@@ -23,12 +23,12 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 	err := ginCtx.ShouldBind(&verifyUserJson)
 
 	if err != nil {
-		errors.ErrorHelper(
+		errorfuncs.ErrorHelper(
 			ginCtx,
-			errors.JsonError{
+			errorfuncs.JsonError{
 				Message: "JSON ERROR 001",
 				Status:  400,
-				Json:    errors.JsonResponseType{Code: "INVALID_BODY", Msg: "JSON ERROR 001"},
+				Json:    errorfuncs.JsonResponseType{Code: "INVALID_BODY", Msg: "JSON ERROR 001"},
 			},
 		)
 		return
@@ -40,12 +40,12 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 
 	//Error if record not found
 	if errorCheck.Is(result.Error, gorm.ErrRecordNotFound) {
-		errors.ErrorHelper(
+		errorfuncs.ErrorHelper(
 			ginCtx,
-			errors.JsonError{
+			errorfuncs.JsonError{
 				Message: "User not found (Email)",
 				Status:  404,
-				Json:    errors.JsonResponseType{Code: "INVALID_USER", Msg: "User not found"},
+				Json:    errorfuncs.JsonResponseType{Code: "INVALID_USER", Msg: "User not found"},
 			},
 		)
 		return
@@ -53,7 +53,7 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 
 	//Network error
 	if result.Error != nil {
-		errors.NetworkError(ginCtx, result.Error)
+		errorfuncs.NetworkError(ginCtx, result.Error)
 		return
 	}
 
@@ -61,17 +61,17 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 	passwordResult, err := argon.ComparePasswordAndHash(verifyUserJson.Password, user.Password)
 
 	if err != nil {
-		errors.NetworkError(ginCtx, err)
+		errorfuncs.NetworkError(ginCtx, err)
 		return
 	}
 
 	if !passwordResult {
-		errors.ErrorHelper(
+		errorfuncs.ErrorHelper(
 			ginCtx,
-			errors.JsonError{
+			errorfuncs.JsonError{
 				Message: "User not found (Passwords)",
 				Status:  404,
-				Json:    errors.JsonResponseType{Code: "INVALID_USER", Msg: "User not found"},
+				Json:    errorfuncs.JsonResponseType{Code: "INVALID_USER", Msg: "User not found"},
 			},
 		)
 		return
@@ -80,7 +80,7 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 	jwtToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 1)
 
 	if err != nil {
-		errors.NetworkError(ginCtx, err)
+		errorfuncs.NetworkError(ginCtx, err)
 		return
 	}
 
