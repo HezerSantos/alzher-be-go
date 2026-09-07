@@ -4,9 +4,9 @@ import (
 	errorCheck "errors"
 	"os"
 
-	"github.com/HezerSantos/alzher-api/services/common/argon"
-	"github.com/HezerSantos/alzher-api/services/common/errorfuncs"
-	"github.com/HezerSantos/alzher-api/services/common/jwt"
+	"github.com/HezerSantos/alzher-api/common/argon"
+	"github.com/HezerSantos/alzher-api/common/errorfuncs"
+	"github.com/HezerSantos/alzher-api/common/jwt"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
 	"github.com/gin-gonic/gin"

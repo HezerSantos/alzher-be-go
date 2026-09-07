@@ -29,7 +29,7 @@ type Transaction struct {
 	Month       string    `gorm:"column:month;type:text"`
 	Year        int       `gorm:"column:year;type:integer"`
 	UserID      uuid.UUID `gorm:"column:userId;type:uuid"`
-	User        User      `gorm:"foreignKey:UserID;references:ID"`
+	User        User      `json:"-" gorm:"foreignKey:UserID;references:ID"`
 }
 
 func (User) TableName() string {

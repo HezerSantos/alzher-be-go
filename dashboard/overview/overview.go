@@ -8,7 +8,10 @@ import (
 	"strconv"
 	"sync"
 
-	userinfo "github.com/HezerSantos/alzher-api/services/common/userInfo"
+	"github.com/HezerSantos/alzher-api/common/api"
+	callresult "github.com/HezerSantos/alzher-api/common/api/models"
+	"github.com/HezerSantos/alzher-api/common/constants"
+	userinfo "github.com/HezerSantos/alzher-api/common/userInfo"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
 	"github.com/gin-gonic/gin"
@@ -18,21 +21,6 @@ import (
 var SEMESTER_MAP = map[int][]string{
 	1: {"Jan", "Feb", "Mar", "Apr", "May", "Jun"},
 	2: {"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"},
-}
-
-var MONTH_ORDER = map[string]int{
-	"Jan": 1,
-	"Feb": 2,
-	"Mar": 3,
-	"Apr": 4,
-	"May": 5,
-	"Jun": 6,
-	"Jul": 7,
-	"Aug": 8,
-	"Sep": 9,
-	"Oct": 10,
-	"Nov": 11,
-	"Dec": 12,
 }
 
 type RequestParams struct {
@@ -102,8 +90,14 @@ type CategoryOverview struct {
 	Percent           float64 `json:"percent"`
 }
 
-func queryTransactionMap(id uuid.UUID, queryYear int, selectedSemester []string) (map[string][]models.Transaction, error) {
-	transactionsMap := map[string][]models.Transaction{}
+type TransactionMapData struct {
+	Amount   float64
+	Month    string
+	Category string
+}
+
+func queryTransactionMap(id uuid.UUID, queryYear int, selectedSemester []string) (map[string][]TransactionMapData, error) {
+	transactionsMap := map[string][]TransactionMapData{}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	errorSlice := make([]error, len(selectedSemester))
@@ -112,7 +106,7 @@ func queryTransactionMap(id uuid.UUID, queryYear int, selectedSemester []string)
 		wg.Add(1)
 		go func(month string, i int) {
 			defer wg.Done()
-			var transactions []models.Transaction
+			var transactions []TransactionMapData
 			err := railway.DB.
 				Model(&models.Transaction{}).
 				Select(`"amount", "month", "category"`).
@@ -134,7 +128,7 @@ func queryTransactionMap(id uuid.UUID, queryYear int, selectedSemester []string)
 	wg.Wait()
 	for _, err := range errorSlice {
 		if err != nil {
-			return map[string][]models.Transaction{}, fmt.Errorf("error fetching transaction map: %w", err)
+			return nil, fmt.Errorf("error fetching transaction map: %w", err)
 		}
 	}
 	return transactionsMap, nil
@@ -189,6 +183,8 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 	queryYear := RequestParams.Year
 	selectedSemester := SEMESTER_MAP[RequestParams.Semester]
 
+	var callResults []callresult.CallResult
+
 	var years []int
 	err = railway.DB.
 		Model(&models.Transaction{}).
@@ -197,12 +193,17 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		Pluck(`"year"`, &years).Error
 
 	if err != nil {
-		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query distinct years"})
+		api.MakeCallResults(&callResults, "Railway: queryYears()", nil, http.StatusInternalServerError, err)
+
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
 		return
 	}
+	api.MakeCallResults(&callResults, "Railway: queryYears()", years, http.StatusOK, nil)
 
 	if len(years) == 0 {
-		ginCtx.JSON(http.StatusNoContent, gin.H{"chartData": nil})
+		ginCtx.JSON(http.StatusNoContent, gin.H{"chartData": nil, "callResults": callResults})
 		return
 	}
 
@@ -220,9 +221,8 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 
 	var userAggregate Stats
 	var distinctMonths []string
-	var transactionMap map[string][]models.Transaction
+	var transactionMap map[string][]TransactionMapData
 	var categoryOverview []CategoryOverview
-	errorSlice := make([]error, 3)
 	var wg sync.WaitGroup
 
 	wg.Add(3)
@@ -232,15 +232,19 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		stats, err := queryUserAggregate(user.ID, queryYear)
 
 		if err != nil {
-			errorSlice[1] = err
+			api.MakeCallResults(&callResults, "Railway: queryUserAggregate()", nil, http.StatusInternalServerError, err)
 			return
 		}
+		api.MakeCallResults(&callResults, "Railway: queryUserAggregate()", stats, http.StatusOK, nil)
+
 		categoryOverviewResult, err := queryCategoryOverview(user.ID, queryYear, stats)
 
 		if err != nil {
-			errorSlice[1] = err
+			api.MakeCallResults(&callResults, "Railway: queryCategoryOverview()", nil, http.StatusInternalServerError, err)
 			return
 		}
+		api.MakeCallResults(&callResults, "Railway: queryCategoryOverview()", categoryOverviewResult, http.StatusOK, nil)
+
 		userAggregate = stats
 		categoryOverview = categoryOverviewResult
 
@@ -250,10 +254,11 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		defer wg.Done()
 		months, err := queryDistinctMonths(user.ID, queryYear)
 		if err != nil {
-			errorSlice[2] = err
+			api.MakeCallResults(&callResults, "Railway: queryDistinctMonths()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		distinctMonths = months
+		api.MakeCallResults(&callResults, "Railway: queryDistinctMonths()", months, http.StatusOK, nil)
 
 	}()
 
@@ -261,17 +266,22 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		defer wg.Done()
 		transactionMapResult, err := queryTransactionMap(user.ID, queryYear, selectedSemester)
 		if err != nil {
-			errorSlice[3] = err
+			api.MakeCallResults(&callResults, "Railway: queryTransactionMap()", nil, http.StatusInternalServerError, err)
+
 			return
 		}
 		transactionMap = transactionMapResult
+		api.MakeCallResults(&callResults, "Railway: queryTransactionMap()", transactionMapResult, http.StatusOK, nil)
+
 	}()
 
 	wg.Wait()
 
-	for _, e := range errorSlice {
-		if e != nil {
-			ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "Error Fetching Transaction Data"})
+	for _, cr := range callResults {
+		if cr.Error != nil {
+			ginCtx.JSON(http.StatusInternalServerError, gin.H{
+				"callResults": callResults,
+			})
 			return
 		}
 	}
@@ -323,7 +333,7 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		monthItems = append(monthItems, monthItem)
 	}
 	sort.Slice(monthItems, func(i, j int) bool {
-		return MONTH_ORDER[monthItems[i].Month] < MONTH_ORDER[monthItems[j].Month]
+		return constants.MONTH_ORDER[monthItems[i].Month] < constants.MONTH_ORDER[monthItems[j].Month]
 	})
 
 	chartData := []map[string]any{}
@@ -432,7 +442,7 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 	if len(monthItems) != 0 {
 		monthItemsOverride = &monthItems
 	}
-	ginCtx.JSON(http.StatusAccepted, gin.H{
+	ginCtx.JSON(http.StatusOK, gin.H{
 		"year":                 fmt.Sprint(queryYear),
 		"semester":             RequestParams.Semester,
 		"overviewDetailsItems": overviewDetailsItems,
@@ -440,5 +450,6 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		"monthItems":           monthItemsOverride,
 		"yearList":             years,
 		"categoryOverview":     categoryOverview,
+		"callResults":          callResults,
 	})
 }
