@@ -8,3 +8,6 @@ tmp/
 
 # Environment
 .env
+
+tmp/*
+!tmp/.gitkeep
