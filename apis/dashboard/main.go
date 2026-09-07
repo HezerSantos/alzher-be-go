@@ -1,10 +1,10 @@
 package dashboard
 
 import (
-	"github.com/HezerSantos/alzher-api/dashboard/activity"
-	"github.com/HezerSantos/alzher-api/dashboard/analytics"
-	"github.com/HezerSantos/alzher-api/dashboard/overview"
-	"github.com/HezerSantos/alzher-api/dashboard/settings"
+	"github.com/HezerSantos/alzher-api/apis/dashboard/activity"
+	"github.com/HezerSantos/alzher-api/apis/dashboard/analytics"
+	"github.com/HezerSantos/alzher-api/apis/dashboard/overview"
+	"github.com/HezerSantos/alzher-api/apis/dashboard/settings"
 	"github.com/HezerSantos/alzher-api/middleware"
 	"github.com/gin-gonic/gin"
 )

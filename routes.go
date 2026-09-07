@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/HezerSantos/alzher-api/auth"
-	"github.com/HezerSantos/alzher-api/dashboard"
+	"github.com/HezerSantos/alzher-api/apis/auth"
+	"github.com/HezerSantos/alzher-api/apis/dashboard"
 	"github.com/gin-gonic/gin"
 )
 
