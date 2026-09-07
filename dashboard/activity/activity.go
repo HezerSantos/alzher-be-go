@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/HezerSantos/alzher-api/common/api"
-	callresult "github.com/HezerSantos/alzher-api/common/api/models"
+	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/common/constants"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
 	userinfo "github.com/HezerSantos/alzher-api/common/userInfo"
@@ -97,7 +97,7 @@ func GetActivityHandler(ginCtx *gin.Context) {
 
 	var transactions []models.Transaction
 	var maxPages int
-	var callResults []callresult.CallResult
+	var callResults []types.CallResult
 	var wg sync.WaitGroup
 
 	wg.Add(2)

@@ -1,4 +1,4 @@
-package models
+package types
 
 type CallResult struct {
 	Source string  `json:"source"`

@@ -9,8 +9,9 @@ import (
 	"sync"
 
 	"github.com/HezerSantos/alzher-api/common/api"
-	callresult "github.com/HezerSantos/alzher-api/common/api/models"
+	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/common/constants"
+	"github.com/HezerSantos/alzher-api/common/errorfuncs"
 	userinfo "github.com/HezerSantos/alzher-api/common/userInfo"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
@@ -170,7 +171,7 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 	if err != nil {
-		ginCtx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		errorfuncs.UnauthorizedError(ginCtx)
 		return
 	}
 	var RequestParams RequestParams
@@ -183,7 +184,7 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 	queryYear := RequestParams.Year
 	selectedSemester := SEMESTER_MAP[RequestParams.Semester]
 
-	var callResults []callresult.CallResult
+	var callResults []types.CallResult
 
 	var years []int
 	err = railway.DB.

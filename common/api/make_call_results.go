@@ -1,14 +1,12 @@
 package api
 
-import (
-	"github.com/HezerSantos/alzher-api/common/api/models"
-)
+import "github.com/HezerSantos/alzher-api/common/api/types"
 
 // This function takes an empty call results slice and appends a call result struct based on parameters
-func MakeCallResults(callResults *[]models.CallResult, source string, result any, status int, err error) {
+func MakeCallResults(callResults *[]types.CallResult, source string, result any, status int, err error) {
 	if err != nil {
 		errorString := err.Error()
-		callResult := models.CallResult{
+		callResult := types.CallResult{
 			Source: source,
 			Result: nil,
 			Status: status,
@@ -22,7 +20,7 @@ func MakeCallResults(callResults *[]models.CallResult, source string, result any
 			*callResults = append(*callResults, *cr)
 		}
 
-		callResult := models.CallResult{
+		callResult := types.CallResult{
 			Source: source,
 			Result: jsonString,
 			Status: status,

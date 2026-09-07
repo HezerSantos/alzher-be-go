@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/HezerSantos/alzher-api/common/api/models"
+	"github.com/HezerSantos/alzher-api/common/api/types"
 )
 
-func MakeJson(jsonSource any, source string) (*string, *models.CallResult) {
+func MakeJson(jsonSource any, source string) (*string, *types.CallResult) {
 	jsonBytes, err := json.Marshal(jsonSource)
 	if err != nil {
 		errorString := err.Error()
-		callResult := models.CallResult{
+		callResult := types.CallResult{
 			Source: source,
 			Result: nil,
 			Status: http.StatusInternalServerError,
