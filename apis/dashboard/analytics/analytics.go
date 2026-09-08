@@ -12,7 +12,7 @@ import (
 	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/common/constants"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
-	userinfo "github.com/HezerSantos/alzher-api/common/userInfo"
+	"github.com/HezerSantos/alzher-api/common/userinfo"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
 	"github.com/gin-gonic/gin"

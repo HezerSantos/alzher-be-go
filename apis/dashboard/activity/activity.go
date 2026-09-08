@@ -10,7 +10,7 @@ import (
 	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/common/constants"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
-	userinfo "github.com/HezerSantos/alzher-api/common/userInfo"
+	"github.com/HezerSantos/alzher-api/common/userinfo"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
 	"github.com/gin-gonic/gin"
@@ -183,4 +183,119 @@ func GetActivityHandler(ginCtx *gin.Context) {
 		"nextPageFlag":     nextPageFlag,
 		"callResults":      callResults,
 	})
+}
+
+type DeleteRequestParams struct {
+	TransactionID string `uri:"id" binding:"required"`
+}
+
+func queryTransactionByID(transactionID uuid.UUID) (*models.Transaction, error) {
+	var transaction models.Transaction
+
+	err := railway.DB.Model(&models.Transaction{}).Where(`"id" = ?`, transactionID).Find(&transaction).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	if transaction.ID == uuid.Nil {
+		return nil, nil
+	}
+
+	return &transaction, nil
+}
+
+func mutateTransactionByID(transactionID uuid.UUID) (bool, error, *gorm.DB) {
+	result := railway.DB.Delete(models.Transaction{}, transactionID)
+
+	if result.Error != nil {
+		return false, result.Error, result
+	}
+
+	if result.RowsAffected == 0 {
+		return false, nil, result
+	}
+
+	return true, nil, result
+}
+
+func DeleteActivityByIDHandler(ginCtx *gin.Context) {
+	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.UnauthorizedError(ginCtx)
+		return
+	}
+
+	var requestParams DeleteRequestParams
+
+	if err := ginCtx.ShouldBindUri(&requestParams); err != nil {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	parsedTransactionId, err := uuid.Parse(requestParams.TransactionID)
+
+	if err != nil {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	var callResults []types.CallResult
+
+	transaction, err := queryTransactionByID(parsedTransactionId)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", nil, http.StatusInternalServerError, err)
+
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+
+		return
+	}
+	api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", transaction, http.StatusOK, nil)
+	if transaction == nil {
+		ginCtx.JSON(http.StatusNotFound, gin.H{
+			"transaction": &transaction,
+			"callResults": callResults,
+		})
+		return
+	}
+
+	if transaction.UserID != user.ID {
+		ginCtx.JSON(http.StatusForbidden, gin.H{
+			"error": "Unauthorized Transaction Permissions",
+		})
+		return
+	}
+
+	deleteOk, err, res := mutateTransactionByID(parsedTransactionId)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Railway: mutateTransactionByID()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+		return
+	}
+
+	if !deleteOk {
+		api.MakeCallResults(&callResults, "Railway: mutateTransactionByID()", res.RowsAffected, http.StatusInternalServerError, nil)
+		ginCtx.JSON(http.StatusNotFound, gin.H{
+			"callResults": callResults,
+		})
+		return
+	}
+	api.MakeCallResults(&callResults, "Railway: mutateTransactionByID()", res.RowsAffected, http.StatusOK, nil)
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"transaction": &transaction,
+		"callResults": callResults,
+	})
+
 }
