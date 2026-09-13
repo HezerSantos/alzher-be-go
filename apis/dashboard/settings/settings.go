@@ -183,3 +183,96 @@ func PatchUserEmail(ginCtx *gin.Context) {
 		"callResults": callResults,
 	})
 }
+
+type PatchUserPasswordRequestBody struct {
+	CurrentPassword string `json:"currentPassword" binding:"required"`
+	Password        string `json:"password" binding:"required"`
+	ConfirmPassword string `json:"confirmPassword" binding:"required,min=3"`
+}
+
+func PatchUserPassword(ginCtx *gin.Context) {
+	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.UnauthorizedError(ginCtx)
+		return
+	}
+
+	var requestBody PatchUserPasswordRequestBody
+
+	err = ginCtx.ShouldBindJSON(&requestBody)
+
+	if err != nil {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	if requestBody.Password != requestBody.ConfirmPassword {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"error": "Paswords Do Not Match",
+		})
+		return
+	}
+
+	var callResults []types.CallResult
+	queriedUser, err := queryUserByID(user.ID)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Railway queryUserByID()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+		return
+	}
+	api.MakeCallResults(&callResults, "Railway: queryUserByID()", *queriedUser, http.StatusOK, nil)
+
+	match, err := argon.ComparePasswordAndHash(requestBody.CurrentPassword, queriedUser.Password)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Argon: ComparePasswordAndHash()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+		return
+	}
+
+	if match == false {
+		ginCtx.JSON(http.StatusUnauthorized, gin.H{
+			"error":       "Unable to Update Password",
+			"callResults": callResults,
+		})
+		return
+	}
+
+	hashedPassword, err := argon.HashPassword(requestBody.Password)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Argon: HashPassword()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+		return
+	}
+
+	updates := map[string]interface{}{
+		"password": hashedPassword,
+	}
+
+	rowsAffected, err := updateUserSettings(user, updates)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Railway: updateUserSettings()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+		return
+	}
+
+	api.MakeCallResults(&callResults, "Railway: updateUserSettings()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"callResults": callResults,
+	})
+}
