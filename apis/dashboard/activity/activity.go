@@ -322,7 +322,7 @@ func updateTransactionByID(transaction *models.Transaction, updates map[string]i
 
 	return &result.RowsAffected, nil
 }
-func PutActivityByIDHandler(ginCtx *gin.Context) {
+func PatchActivityByIDHandler(ginCtx *gin.Context) {
 
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 
