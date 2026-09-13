@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/HezerSantos/alzher-api/common/api"
@@ -185,7 +187,7 @@ func GetActivityHandler(ginCtx *gin.Context) {
 	})
 }
 
-type DeleteRequestParams struct {
+type DeleteRequestUri struct {
 	TransactionID string `uri:"id" binding:"required"`
 }
 
@@ -227,7 +229,7 @@ func DeleteActivityByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	var requestParams DeleteRequestParams
+	var requestParams DeleteRequestUri
 
 	if err := ginCtx.ShouldBindUri(&requestParams); err != nil {
 		ginCtx.JSON(http.StatusBadRequest, gin.H{
@@ -294,8 +296,157 @@ func DeleteActivityByIDHandler(ginCtx *gin.Context) {
 	api.MakeCallResults(&callResults, "Railway: mutateTransactionByID()", res.RowsAffected, http.StatusOK, nil)
 
 	ginCtx.JSON(http.StatusOK, gin.H{
-		"transaction": &transaction,
+		"transaction": transaction,
 		"callResults": callResults,
 	})
 
+}
+
+type PutRequestBody struct {
+	Category        string  `json:"category" binding:"omitempty,oneof=Dining Merchandise Entertainment Grocery Transportation Subscriptions Bills"`
+	Description     string  `json:"description"`
+	Amount          float64 `json:"amount"`
+	TransactionDate string  `json:"transactionDate" binding:"dateformat"`
+}
+
+type PutRequestUri struct {
+	TransactionID string `uri:"id" binding:"required"`
+}
+
+func updateTransactionByID(transaction *models.Transaction, updates map[string]interface{}) (*int64, error) {
+	result := railway.DB.Model(transaction).Updates(updates)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return &result.RowsAffected, nil
+}
+func PutActivityByIDHandler(ginCtx *gin.Context) {
+
+	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.UnauthorizedError(ginCtx)
+		return
+	}
+
+	var requestBody PutRequestBody
+	var requestUri PutRequestUri
+
+	if err := ginCtx.ShouldBindUri(&requestUri); err != nil {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	if err := ginCtx.ShouldBindJSON(&requestBody); err != nil {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	parsedTransactionId, err := uuid.Parse(requestUri.TransactionID)
+
+	if err != nil {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	var callResults []types.CallResult
+
+	transaction, err := queryTransactionByID(parsedTransactionId)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", nil, http.StatusInternalServerError, err)
+
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+
+		return
+	}
+	api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", transaction, http.StatusOK, nil)
+	if transaction == nil {
+		ginCtx.JSON(http.StatusNotFound, gin.H{
+			"transaction": &transaction,
+			"callResults": callResults,
+		})
+		return
+	}
+
+	if transaction.UserID != user.ID {
+		ginCtx.JSON(http.StatusForbidden, gin.H{
+			"error": "Unauthorized Transaction Permissions",
+		})
+		return
+	}
+
+	updatedTransactionMap := map[string]interface{}{}
+
+	if requestBody.Category != "" && requestBody.Category != transaction.Category {
+		updatedTransactionMap["category"] = requestBody.Category
+	}
+	if requestBody.Description != "" {
+		updatedTransactionMap["description"] = requestBody.Description
+	}
+	if requestBody.Amount != 0 {
+		updatedTransactionMap["amount"] = requestBody.Amount
+	}
+	if requestBody.TransactionDate != "" {
+		splitTransactionDate := strings.Split(requestBody.TransactionDate, "/")
+
+		newMonth := splitTransactionDate[0]
+		newDay := splitTransactionDate[1]
+		newYear := splitTransactionDate[2]
+
+		numDay, _ := strconv.Atoi(newDay)
+		numMonth, _ := strconv.Atoi(newMonth)
+		numYear, _ := strconv.Atoi(newYear)
+
+		updatedTransactionMap["day"] = numDay
+		updatedTransactionMap["year"] = numYear
+
+		var stringMonth string
+
+		for month, order := range constants.MONTH_ORDER {
+			if numMonth == order {
+				stringMonth = month
+				break
+			}
+		}
+
+		updatedTransactionMap["month"] = stringMonth
+	}
+
+	if len(updatedTransactionMap) == 0 {
+		ginCtx.JSON(http.StatusOK, gin.H{
+			"transaction":        transaction,
+			"updatedTransaction": nil,
+			"updatedMap":         updatedTransactionMap,
+			"callResults":        callResults,
+		})
+		return
+	}
+
+	rowsAffected, err := updateTransactionByID(transaction, updatedTransactionMap)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Railway: updateTransactionByID()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": callResults,
+		})
+		return
+	}
+
+	api.MakeCallResults(&callResults, "Railway: updateTransactionByID()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"transaction": transaction,
+		"updatedMap":  updatedTransactionMap,
+		"callResults": callResults,
+	})
 }

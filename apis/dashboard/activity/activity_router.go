@@ -7,4 +7,5 @@ func ConnectActivityRouter(r *gin.RouterGroup) {
 	activity.GET("/", GetActivityHandler)
 
 	activity.DELETE("/:id", DeleteActivityByIDHandler)
+	activity.PUT("/:id", PutActivityByIDHandler)
 }
