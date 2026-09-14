@@ -9,6 +9,7 @@ import (
 
 	"github.com/HezerSantos/alzher-api/common/api"
 	"github.com/HezerSantos/alzher-api/common/api/types"
+	"github.com/HezerSantos/alzher-api/services/common/ai"
 )
 
 type OllamaRequest struct {
@@ -29,15 +30,7 @@ type OllamaResponse struct {
 	PromptEvalDuration int64  `json:"prompt_eval_duration"`
 }
 
-type Transaction struct {
-	Transactions []struct {
-		PostDate    string  `json:"postDate"`
-		Description string  `json:"description"`
-		Amount      float64 `json:"amount"`
-	} `json:"transactions"`
-}
-
-func AskOllama(transactionString string) (*Transaction, []types.CallResult) {
+func AskOllama(transactionString string) (*ai.Transaction, []types.CallResult) {
 	var OLLAMA_URL = os.Getenv("OLLAMA_URL")
 	var callResults []types.CallResult
 
@@ -47,8 +40,6 @@ func AskOllama(transactionString string) (*Transaction, []types.CallResult) {
 		return nil, callResults
 	}
 
-	promptWithTransactions := promptHelper
-	promptWithTransactions += transactionString
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -82,7 +73,7 @@ func AskOllama(transactionString string) (*Transaction, []types.CallResult) {
 
 	body := OllamaRequest{
 		Model:  "qwen2.5:1.5b",
-		Prompt: promptWithTransactions,
+		Prompt: ai.ReturnFinancialPromptInstructions(transactionString),
 		Format: schema,
 		Stream: false,
 		Options: map[string]any{
@@ -118,7 +109,7 @@ func AskOllama(transactionString string) (*Transaction, []types.CallResult) {
 
 	api.MakeCallResults(&callResults, "Ollama: json.NewDecoder().Decode()", result, http.StatusOK, nil)
 
-	var transactions Transaction
+	var transactions ai.Transaction
 
 	err = json.Unmarshal([]byte(result.Response), &transactions)
 

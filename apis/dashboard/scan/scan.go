@@ -2,6 +2,7 @@ package scan
 
 import (
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -9,47 +10,54 @@ import (
 
 	"github.com/HezerSantos/alzher-api/common/api"
 	"github.com/HezerSantos/alzher-api/common/api/types"
+	"github.com/HezerSantos/alzher-api/services/common/ai"
+	"github.com/HezerSantos/alzher-api/services/groq"
 	"github.com/HezerSantos/alzher-api/services/ollama"
+	"github.com/gen2brain/go-fitz"
 	"github.com/gin-gonic/gin"
-	"github.com/ledongthuc/pdf"
 )
 
-func processFile(file *multipart.FileHeader) (*ollama.Transaction, []types.CallResult) {
+func processFile(file *multipart.FileHeader) (*ai.Transaction, []types.CallResult) {
 	var callResults []types.CallResult
 
-	f, e := file.Open()
-	if e != nil {
-		api.MakeCallResults(&callResults, "Ollama:  file.Open()", nil, http.StatusInternalServerError, e)
-
+	f, err := file.Open()
+	if err != nil {
+		api.MakeCallResults(&callResults, "Groq: file.Open()", nil, http.StatusInternalServerError, err)
 		return nil, callResults
 	}
 	defer f.Close()
 
-	p, err := pdf.NewReader(f, file.Size)
-
+	contents, err := io.ReadAll(f)
 	if err != nil {
-		api.MakeCallResults(&callResults, "Ollama:  pdf.NewReader()", nil, http.StatusInternalServerError, e)
-
+		api.MakeCallResults(&callResults, "Groq: io.ReadAll()", nil, http.StatusInternalServerError, err)
 		return nil, callResults
 	}
 
-	var text strings.Builder
+	// Uses MuPDF engine in-memory — handles Chase, Capital One, and encrypted streams without panicking
+	doc, err := fitz.NewFromMemory(contents)
+	if err != nil {
+		api.MakeCallResults(&callResults, "Groq: fitz.NewFromMemory()", nil, http.StatusInternalServerError, err)
+		return nil, callResults
+	}
+	defer doc.Close()
 
-	for pageNum := 1; pageNum <= p.NumPage(); pageNum++ {
-		page := p.Page(pageNum)
-
-		pageText, err := page.GetPlainText(nil)
-
+	var textBuilder strings.Builder
+	for n := 0; n < doc.NumPage(); n++ {
+		pageText, err := doc.Text(n)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Ollama:  page.GetPlainText()", nil, http.StatusInternalServerError, e)
-
+			api.MakeCallResults(&callResults, "Groq: doc.Text()", nil, http.StatusInternalServerError, err)
 			return nil, callResults
 		}
-		text.WriteString(pageText)
+		textBuilder.WriteString(pageText)
 	}
 
-	normalized := ollama.NormalizeStatementText(text.String())
-	transactions, callResultsResponse := ollama.AskOllama(normalized)
+	normalized := ollama.NormalizeStatementText(textBuilder.String())
+	transactions, err, callResultsResponse := groq.AskGroq(normalized)
+
+	if err != nil {
+		api.MakeCallResults(&callResults, "Groq: processFile()", nil, http.StatusInternalServerError, err)
+		return nil, callResults
+	}
 
 	callResults = append(callResults, callResultsResponse...)
 	for _, err := range callResultsResponse {
@@ -79,7 +87,7 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 	files := form.File["files"]
 
 	var callResults []types.CallResult
-	var transactions []ollama.Transaction
+	var transactions []ai.Transaction
 
 	var mu sync.Mutex
 
@@ -99,8 +107,13 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 					return
 				}
 			}
-			api.MakeCallResults(&callResults, fmt.Sprintf("Ollama: File-%s", file.Filename), transactionResult, http.StatusOK, nil)
-			transactions = append(transactions, *transactionResult)
+			if transactionResult != nil {
+				api.MakeCallResults(&callResults, fmt.Sprintf("Groq: File-%s", file.Filename), transactionResult, http.StatusOK, nil)
+				transactions = append(transactions, *transactionResult)
+			} else {
+				// Record an error if transactionResult is nil despite no explicit call error
+				api.MakeCallResults(&callResults, fmt.Sprintf("Groq: File-%s", file.Filename), nil, http.StatusInternalServerError, fmt.Errorf("transaction extraction returned nil result"))
+			}
 
 		}(file)
 	}

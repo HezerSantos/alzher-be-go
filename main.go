@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/HezerSantos/alzher-api/services/railway"
@@ -8,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 	"github.com/joho/godotenv"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 )
 
 var dateRegex = regexp.MustCompile(
@@ -27,7 +32,22 @@ func validateDate(fl validator.FieldLevel) bool {
 func main() {
 	godotenv.Load()
 
-	err := railway.ConnectDatabase()
+	client := openai.NewClient(
+		option.WithAPIKey(os.Getenv("GROQ_API_KEY")),
+		option.WithBaseURL(os.Getenv("GROQ_URL")),
+	)
+
+	models, err := client.Models.List(context.Background())
+	if err != nil {
+		fmt.Printf("Error fetching models: %v\n", err)
+		return
+	}
+
+	fmt.Println("Available models for your API key:")
+	for _, model := range models.Data {
+		fmt.Println("-", model.ID)
+	}
+	err = railway.ConnectDatabase()
 
 	if err != nil {
 		panic(err.Error())
