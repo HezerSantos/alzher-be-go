@@ -14,17 +14,23 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-func processFile(i int, file *multipart.FileHeader) ([]ollama.Transaction, error) {
+func processFile(file *multipart.FileHeader) (*ollama.Transaction, []types.CallResult) {
+	var callResults []types.CallResult
+
 	f, e := file.Open()
 	if e != nil {
-		return nil, e
+		api.MakeCallResults(&callResults, "Ollama:  file.Open()", nil, http.StatusInternalServerError, e)
+
+		return nil, callResults
 	}
 	defer f.Close()
 
 	p, err := pdf.NewReader(f, file.Size)
 
 	if err != nil {
-		return nil, err
+		api.MakeCallResults(&callResults, "Ollama:  pdf.NewReader()", nil, http.StatusInternalServerError, e)
+
+		return nil, callResults
 	}
 
 	var text strings.Builder
@@ -35,18 +41,24 @@ func processFile(i int, file *multipart.FileHeader) ([]ollama.Transaction, error
 		pageText, err := page.GetPlainText(nil)
 
 		if err != nil {
-			return nil, err
+			api.MakeCallResults(&callResults, "Ollama:  page.GetPlainText()", nil, http.StatusInternalServerError, e)
+
+			return nil, callResults
 		}
 		text.WriteString(pageText)
 	}
 
-	transactions, err := ollama.AskOllama(text.String())
+	normalized := ollama.NormalizeStatementText(text.String())
+	transactions, callResultsResponse := ollama.AskOllama(normalized)
 
-	if err != nil {
-		return nil, err
+	callResults = append(callResults, callResultsResponse...)
+	for _, err := range callResultsResponse {
+		if err.Error != nil {
+			return nil, callResults
+		}
 	}
 
-	return transactions, nil
+	return transactions, callResults
 }
 
 func PostDashboardDocument(ginCtx *gin.Context) {
@@ -72,23 +84,25 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 	var mu sync.Mutex
 
 	var wg sync.WaitGroup
-	for i, file := range files {
+	for _, file := range files {
 		wg.Add(1)
-		go func(i int, file *multipart.FileHeader) {
+		go func(file *multipart.FileHeader) {
 			defer wg.Done()
 
-			transactionResult, err := processFile(i, file)
+			transactionResult, callResultsResponse := processFile(file)
 
 			mu.Lock()
 			defer mu.Unlock()
-			if err != nil {
-				api.MakeCallResults(&callResults, fmt.Sprintf("Ollama: File-%s", file.Filename), nil, http.StatusInternalServerError, err)
-				return
+			for _, err := range callResultsResponse {
+				if err.Error != nil {
+					callResults = append(callResults, callResultsResponse...)
+					return
+				}
 			}
-			api.MakeCallResults(&callResults, fmt.Sprintf("Ollama: File-%s", file.Filename), transactionResult, http.StatusInternalServerError, nil)
-			transactions = append(transactions, transactionResult...)
+			api.MakeCallResults(&callResults, fmt.Sprintf("Ollama: File-%s", file.Filename), transactionResult, http.StatusOK, nil)
+			transactions = append(transactions, *transactionResult)
 
-		}(i, file)
+		}(file)
 	}
 
 	wg.Wait()
@@ -101,4 +115,9 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 			return
 		}
 	}
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"transactions": transactions,
+		"callResults":  callResults,
+	})
 }

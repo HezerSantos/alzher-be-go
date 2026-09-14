@@ -12,13 +12,12 @@ import (
 	"github.com/google/uuid"
 )
 
-var SECURE_AUTH_SECRET = []byte(os.Getenv("SECURE_AUTH_SECRET"))
-
 type UserContextKeyType string
 
 const UserContextKey UserContextKeyType = "userID"
 
 func AuthMiddleware() gin.HandlerFunc {
+	var SECURE_AUTH_SECRET = []byte(os.Getenv("SECURE_AUTH_SECRET"))
 	return func(ginCtx *gin.Context) {
 		cookie, err := ginCtx.Request.Cookie("__Secure-secure-auth.access")
 

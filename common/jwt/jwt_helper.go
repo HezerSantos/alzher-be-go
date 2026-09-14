@@ -8,9 +8,8 @@ import (
 	"github.com/google/uuid"
 )
 
-var AUTH_SECRET = []byte(os.Getenv("SECURE_AUTH_SECRET"))
-
 func GenerateUserJWT(userId uuid.UUID, email string, exp int) (string, error) {
+	AUTH_SECRET := []byte(os.Getenv("SECURE_AUTH_SECRET"))
 	claims := jwt.MapClaims{
 		"sub":   userId,
 		"email": email,
