@@ -1,6 +1,10 @@
 package scan
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -10,19 +14,43 @@ import (
 
 	"github.com/HezerSantos/alzher-api/common/api"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
+	"github.com/HezerSantos/alzher-api/common/userinfo"
 	"github.com/HezerSantos/alzher-api/services/common/ai"
 	"github.com/HezerSantos/alzher-api/services/groq"
 	"github.com/HezerSantos/alzher-api/services/ollama"
+	"github.com/HezerSantos/alzher-api/services/railway"
+	"github.com/HezerSantos/alzher-api/services/railway/models"
 	"github.com/gen2brain/go-fitz"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-// func hash(data []byte) string {
-// 	hash := sha256.Sum256(data)
-// 	return hex.EncodeToString(hash[:])
-// }
+func hash(data []byte) string {
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:])
+}
 
-func processFile(crc *api.CallResultContainer, file *multipart.FileHeader) (*ai.Transaction, error) {
+func queryStatementHash(userId uuid.UUID, fileHash string) (*models.Statements, error) {
+	var statement *models.Statements
+
+	err := railway.DB.Model(&models.Statements{}).
+		Where(`"userId" = ?`, userId).
+		Where(`"statementId" = ?`, fileHash).
+		First(&statement).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return statement, nil
+}
+
+func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallResultContainer, file *multipart.FileHeader, hashSlice []string, userId uuid.UUID) (*ai.Transaction, error) {
 
 	f, err := file.Open()
 	if err != nil {
@@ -36,6 +64,29 @@ func processFile(crc *api.CallResultContainer, file *multipart.FileHeader) (*ai.
 		crc.Add("processFile(): io.ReadAll()", nil, http.StatusInternalServerError, err)
 
 		return nil, err
+	}
+
+	var mu sync.Mutex
+	fileHash := hash(contents)
+
+	mu.Lock()
+	hashSlice = append(hashSlice, fileHash)
+	mu.Unlock()
+
+	statement, err := queryStatementHash(userId, fileHash)
+
+	if err != nil {
+		crc.Add("processFile(): queryStatementHash()", nil, http.StatusInternalServerError, err)
+		return nil, err
+	}
+
+	crc.Add("processFile(): queryStatementHash()", statement, http.StatusOK, nil)
+
+	if statement != nil {
+		cancel()
+		crc.Add("processFile(): queryStatementHash()", statement, http.StatusConflict, fmt.Errorf("Statement Already Exists"))
+		crc.SetStatus(http.StatusConflict)
+		return nil, fmt.Errorf("Statement Already Exists")
 	}
 
 	// Uses MuPDF engine in-memory — handles Chase, Capital One, and encrypted streams without panicking
@@ -59,7 +110,7 @@ func processFile(crc *api.CallResultContainer, file *multipart.FileHeader) (*ai.
 	}
 
 	normalized := ollama.NormalizeStatementText(textBuilder.String())
-	transactions, err := groq.AskGroq(crc, normalized)
+	transactions, err := groq.AskGroq(ctx, crc, normalized)
 
 	if err != nil {
 		crc.Add("processFile(): processFile()", nil, http.StatusInternalServerError, err)
@@ -77,6 +128,13 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		errorfuncs.NetworkError(ginCtx, err)
 		return
 	}
+
+	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.UnauthorizedError(ginCtx)
+	}
+
 	form, err := ginCtx.MultipartForm()
 
 	if err != nil {
@@ -91,12 +149,21 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 	var mu sync.Mutex
 
 	var wg sync.WaitGroup
+
+	var hashSlice []string
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	for _, file := range files {
 		wg.Add(1)
 		go func(file *multipart.FileHeader) {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			defer wg.Done()
 
-			transactionResult, err := processFile(crc, file)
+			transactionResult, err := processFile(ctx, cancel, crc, file, hashSlice, user.ID)
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -116,7 +183,7 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 	wg.Wait()
 
 	if crc.HasError() {
-		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+		ginCtx.JSON(crc.Status(), gin.H{
 			"callResults": crc.CallResults,
 		})
 		return

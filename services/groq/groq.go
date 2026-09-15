@@ -14,7 +14,7 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-func AskGroq(crc *api.CallResultContainer, input string) (*ai.Transaction, error) {
+func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) (*ai.Transaction, error) {
 	GROQ_API_KEY := os.Getenv("GROQ_API_KEY")
 	GROQ_URL := os.Getenv("GROQ_URL")
 
@@ -34,7 +34,7 @@ func AskGroq(crc *api.CallResultContainer, input string) (*ai.Transaction, error
 
 	prompt := ai.ReturnFinancialPromptInstructions(input)
 	resp, err := client.Chat.Completions.New(
-		context.Background(),
+		ctx,
 		openai.ChatCompletionNewParams{
 			Model: "openai/gpt-oss-20b",
 			Messages: []openai.ChatCompletionMessageParamUnion{
@@ -50,11 +50,11 @@ func AskGroq(crc *api.CallResultContainer, input string) (*ai.Transaction, error
 		var apiErr *openai.Error
 		if errors.As(err, &apiErr) {
 			crc.Add("Groq: New()", nil, apiErr.StatusCode, err)
-			return nil, nil
+			return nil, err
 		}
 		crc.Add("Groq: New()", nil, http.StatusInternalServerError, err)
 
-		return nil, nil
+		return nil, err
 	}
 
 	crc.Add("Groq: New()", resp, http.StatusOK, nil)
@@ -70,7 +70,7 @@ func AskGroq(crc *api.CallResultContainer, input string) (*ai.Transaction, error
 		&transactions,
 	); err != nil {
 		crc.Add("Groq: json.Unmarshal()", nil, http.StatusInternalServerError, err)
-		return nil, nil
+		return nil, err
 	}
 
 	return &transactions, nil
