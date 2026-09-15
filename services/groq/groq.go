@@ -9,24 +9,23 @@ import (
 	"os"
 
 	"github.com/HezerSantos/alzher-api/common/api"
-	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/services/common/ai"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
 
-func AskGroq(input string) (*ai.Transaction, error, []types.CallResult) {
+func AskGroq(crc *api.CallResultContainer, input string) (*ai.Transaction, error) {
 	GROQ_API_KEY := os.Getenv("GROQ_API_KEY")
 	GROQ_URL := os.Getenv("GROQ_URL")
 
 	if GROQ_API_KEY == "" {
-		return nil, fmt.Errorf("GROQ API KEY Not Configure"), nil
+		crc.Add("Groq: os.Getenv()", nil, http.StatusInternalServerError, fmt.Errorf("GROQ API KEY Not Configure"))
+		return nil, fmt.Errorf("GROQ API KEY Not Configure")
 	}
 	if GROQ_URL == "" {
-		return nil, fmt.Errorf("GROQ URL Not Configure"), nil
+		crc.Add("Groq: os.Getenv()", nil, http.StatusInternalServerError, fmt.Errorf("GROQ URL Not Configure"))
+		return nil, fmt.Errorf("GROQ URL Not Configure")
 	}
-
-	var callResults []types.CallResult
 
 	client := openai.NewClient(
 		option.WithAPIKey(GROQ_API_KEY),
@@ -34,7 +33,6 @@ func AskGroq(input string) (*ai.Transaction, error, []types.CallResult) {
 	)
 
 	prompt := ai.ReturnFinancialPromptInstructions(input)
-
 	resp, err := client.Chat.Completions.New(
 		context.Background(),
 		openai.ChatCompletionNewParams{
@@ -51,16 +49,18 @@ func AskGroq(input string) (*ai.Transaction, error, []types.CallResult) {
 	if err != nil {
 		var apiErr *openai.Error
 		if errors.As(err, &apiErr) {
-			api.MakeCallResults(&callResults, "Groq: New()", nil, apiErr.StatusCode, err)
-			return nil, nil, callResults
+			crc.Add("Groq: New()", nil, apiErr.StatusCode, err)
+			return nil, nil
 		}
-		api.MakeCallResults(&callResults, "Groq: New()", nil, http.StatusInternalServerError, err)
-		return nil, nil, callResults
+		crc.Add("Groq: New()", nil, http.StatusInternalServerError, err)
+
+		return nil, nil
 	}
 
-	api.MakeCallResults(&callResults, "Groq: New()", resp, http.StatusOK, nil)
+	crc.Add("Groq: New()", resp, http.StatusOK, nil)
+
 	if len(resp.Choices) == 0 {
-		return nil, nil, callResults
+		return nil, nil
 	}
 
 	var transactions ai.Transaction
@@ -69,9 +69,9 @@ func AskGroq(input string) (*ai.Transaction, error, []types.CallResult) {
 		[]byte(resp.Choices[0].Message.Content),
 		&transactions,
 	); err != nil {
-		api.MakeCallResults(&callResults, "Groq: json.Unmarshal()", nil, http.StatusInternalServerError, err)
-		return nil, nil, callResults
+		crc.Add("Groq: json.Unmarshal()", nil, http.StatusInternalServerError, err)
+		return nil, nil
 	}
 
-	return &transactions, nil, callResults
+	return &transactions, nil
 }

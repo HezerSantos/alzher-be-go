@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 
+	"github.com/HezerSantos/alzher-api/middleware"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -59,7 +60,7 @@ func main() {
 
 	r := gin.Default()
 
-	api := r.Group("/api")
+	api := r.Group("/api", middleware.AttatchContext())
 	ConnectRouter(api)
 
 	r.Run(":8080")
