@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/HezerSantos/alzher-api/common/api"
-	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/common/constants"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
 	"github.com/HezerSantos/alzher-api/common/userinfo"
@@ -75,6 +74,13 @@ func queryMaxPages(id uuid.UUID, params RequestParams) (*int, error) {
 }
 
 func GetActivityHandler(ginCtx *gin.Context) {
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err)
+		return
+	}
+
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 
 	if err != nil {
@@ -99,7 +105,6 @@ func GetActivityHandler(ginCtx *gin.Context) {
 
 	var transactions []models.Transaction
 	var maxPages int
-	var callResults []types.CallResult
 	var wg sync.WaitGroup
 
 	wg.Add(2)
@@ -108,33 +113,31 @@ func GetActivityHandler(ginCtx *gin.Context) {
 		defer wg.Done()
 		transactionResult, err := queryTransactions(user.ID, requestParams)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryTransactions()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryTransactions()", nil, http.StatusInternalServerError, err)
 			return
 		}
 
 		transactions = transactionResult
-		api.MakeCallResults(&callResults, "Railway: queryTransactions()", transactionResult, http.StatusOK, nil)
+		crc.Add("Railway: queryTransactions()", transactionResult, http.StatusOK, nil)
 	}()
 	go func() {
 		defer wg.Done()
 		maxPagesResult, err := queryMaxPages(user.ID, requestParams)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryMaxPages()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryMaxPages()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		maxPages = *maxPagesResult
-		api.MakeCallResults(&callResults, "Railway: queryMaxPages()", maxPagesResult, http.StatusOK, nil)
+		crc.Add("Railway: queryMaxPages()", maxPagesResult, http.StatusOK, nil)
 	}()
 
 	wg.Wait()
 
-	for _, cr := range callResults {
-		if cr.Error != nil {
-			ginCtx.JSON(http.StatusInternalServerError, gin.H{
-				"callResults": callResults,
-			})
-			return
-		}
+	if crc.HasError() {
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": crc.CallResults,
+		})
+		return
 	}
 
 	type TransactionItem struct {
@@ -183,7 +186,7 @@ func GetActivityHandler(ginCtx *gin.Context) {
 		"transactionData":  transactionData,
 		"previousPageFlag": previousPageFlag,
 		"nextPageFlag":     nextPageFlag,
-		"callResults":      callResults,
+		"callResults":      crc.CallResults,
 	})
 }
 
@@ -222,6 +225,14 @@ func mutateTransactionByID(transactionID uuid.UUID) (bool, error, *gorm.DB) {
 }
 
 func DeleteActivityByIDHandler(ginCtx *gin.Context) {
+
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err)
+		return
+	}
+
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 
 	if err != nil {
@@ -247,24 +258,23 @@ func DeleteActivityByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	var callResults []types.CallResult
-
 	transaction, err := queryTransactionByID(parsedTransactionId)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: queryTransactionByID()", nil, http.StatusInternalServerError, err)
 
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 
 		return
 	}
-	api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", transaction, http.StatusOK, nil)
+	crc.Add("Railway: queryTransactionByID()", transaction, http.StatusOK, nil)
+
 	if transaction == nil {
 		ginCtx.JSON(http.StatusNotFound, gin.H{
 			"transaction": &transaction,
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
@@ -279,25 +289,25 @@ func DeleteActivityByIDHandler(ginCtx *gin.Context) {
 	deleteOk, err, res := mutateTransactionByID(parsedTransactionId)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: mutateTransactionByID()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: mutateTransactionByID()", nil, http.StatusInternalServerError, err)
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
 
 	if !deleteOk {
-		api.MakeCallResults(&callResults, "Railway: mutateTransactionByID()", res.RowsAffected, http.StatusInternalServerError, nil)
+		crc.Add("Railway: mutateTransactionByID()", res.RowsAffected, http.StatusInternalServerError, nil)
 		ginCtx.JSON(http.StatusNotFound, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
-	api.MakeCallResults(&callResults, "Railway: mutateTransactionByID()", res.RowsAffected, http.StatusOK, nil)
+	crc.Add("Railway: mutateTransactionByID()", res.RowsAffected, http.StatusOK, nil)
 
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"transaction": transaction,
-		"callResults": callResults,
+		"callResults": crc.CallResults,
 	})
 
 }
@@ -323,6 +333,13 @@ func updateTransactionByID(transaction *models.Transaction, updates map[string]i
 	return &result.RowsAffected, nil
 }
 func PatchActivityByIDHandler(ginCtx *gin.Context) {
+
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err)
+		return
+	}
 
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 
@@ -356,24 +373,24 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	var callResults []types.CallResult
-
 	transaction, err := queryTransactionByID(parsedTransactionId)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: queryTransactionByID()", nil, http.StatusInternalServerError, err)
 
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 
 		return
 	}
-	api.MakeCallResults(&callResults, "Railway: queryTransactionByID()", transaction, http.StatusOK, nil)
+
+	crc.Add("Railway: queryTransactionByID()", transaction, http.StatusOK, nil)
+
 	if transaction == nil {
 		ginCtx.JSON(http.StatusNotFound, gin.H{
 			"transaction": &transaction,
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
@@ -427,7 +444,7 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 			"transaction":        transaction,
 			"updatedTransaction": nil,
 			"updatedMap":         updatedTransactionMap,
-			"callResults":        callResults,
+			"callResults":        crc.CallResults,
 		})
 		return
 	}
@@ -435,18 +452,19 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 	rowsAffected, err := updateTransactionByID(transaction, updatedTransactionMap)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: updateTransactionByID()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: updateTransactionByID()", nil, http.StatusInternalServerError, err)
+
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
 
-	api.MakeCallResults(&callResults, "Railway: updateTransactionByID()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
+	crc.Add("Railway: updateTransactionByID()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
 
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"transaction": transaction,
 		"updatedMap":  updatedTransactionMap,
-		"callResults": callResults,
+		"callResults": crc.CallResults,
 	})
 }

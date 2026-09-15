@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/HezerSantos/alzher-api/common/api"
-	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/common/constants"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
 	"github.com/HezerSantos/alzher-api/common/userinfo"
@@ -169,6 +168,13 @@ func queryCategoryOverview(id uuid.UUID, queryYear int, userAggregate Stats) ([]
 }
 func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err)
+		return
+	}
+
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 	if err != nil {
 		errorfuncs.UnauthorizedError(ginCtx)
@@ -184,8 +190,6 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 	queryYear := RequestParams.Year
 	selectedSemester := SEMESTER_MAP[RequestParams.Semester]
 
-	var callResults []types.CallResult
-
 	var years []int
 	err = railway.DB.
 		Model(&models.Transaction{}).
@@ -194,17 +198,17 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		Pluck(`"year"`, &years).Error
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: queryYears()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: queryYears()", nil, http.StatusInternalServerError, err)
 
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
-	api.MakeCallResults(&callResults, "Railway: queryYears()", years, http.StatusOK, nil)
+	crc.Add("Railway: queryYears()", years, http.StatusOK, nil)
 
 	if len(years) == 0 {
-		ginCtx.JSON(http.StatusNoContent, gin.H{"chartData": nil, "callResults": callResults})
+		ginCtx.JSON(http.StatusNoContent, gin.H{"chartData": nil, "callResults": crc.CallResults})
 		return
 	}
 
@@ -233,18 +237,18 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		stats, err := queryUserAggregate(user.ID, queryYear)
 
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryUserAggregate()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryUserAggregate()", nil, http.StatusInternalServerError, err)
 			return
 		}
-		api.MakeCallResults(&callResults, "Railway: queryUserAggregate()", stats, http.StatusOK, nil)
+		crc.Add("Railway: queryUserAggregate()", stats, http.StatusOK, nil)
 
 		categoryOverviewResult, err := queryCategoryOverview(user.ID, queryYear, stats)
 
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryCategoryOverview()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryCategoryOverview()", nil, http.StatusInternalServerError, err)
 			return
 		}
-		api.MakeCallResults(&callResults, "Railway: queryCategoryOverview()", categoryOverviewResult, http.StatusOK, nil)
+		crc.Add("Railway: queryCategoryOverview()", categoryOverviewResult, http.StatusOK, nil)
 
 		userAggregate = stats
 		categoryOverview = categoryOverviewResult
@@ -255,11 +259,11 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		defer wg.Done()
 		months, err := queryDistinctMonths(user.ID, queryYear)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryDistinctMonths()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryDistinctMonths()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		distinctMonths = months
-		api.MakeCallResults(&callResults, "Railway: queryDistinctMonths()", months, http.StatusOK, nil)
+		crc.Add("Railway: queryDistinctMonths()", months, http.StatusOK, nil)
 
 	}()
 
@@ -267,24 +271,22 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		defer wg.Done()
 		transactionMapResult, err := queryTransactionMap(user.ID, queryYear, selectedSemester)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryTransactionMap()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryTransactionMap()", nil, http.StatusInternalServerError, err)
 
 			return
 		}
 		transactionMap = transactionMapResult
-		api.MakeCallResults(&callResults, "Railway: queryTransactionMap()", transactionMapResult, http.StatusOK, nil)
+		crc.Add("Railway: queryTransactionMap()", transactionMapResult, http.StatusOK, nil)
 
 	}()
 
 	wg.Wait()
 
-	for _, cr := range callResults {
-		if cr.Error != nil {
-			ginCtx.JSON(http.StatusInternalServerError, gin.H{
-				"callResults": callResults,
-			})
-			return
-		}
+	if crc.HasError() {
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": crc.CallResults,
+		})
+		return
 	}
 
 	categoryTransactionMap := map[string]map[string]float64{}
@@ -451,6 +453,6 @@ func GetDashboardOverviewHandler(ginCtx *gin.Context) {
 		"monthItems":           monthItemsOverride,
 		"yearList":             years,
 		"categoryOverview":     categoryOverview,
-		"callResults":          callResults,
+		"callResults":          crc.CallResults,
 	})
 }

@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/HezerSantos/alzher-api/common/api"
-	"github.com/HezerSantos/alzher-api/common/api/types"
 	"github.com/HezerSantos/alzher-api/common/constants"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
 	"github.com/HezerSantos/alzher-api/common/userinfo"
@@ -236,6 +235,13 @@ func queryYearlyMonthlyData(id uuid.UUID) ([]MonthlyYearlySums, error) {
 
 func GetAnalyticsHandler(ginCtx *gin.Context) {
 
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err)
+		return
+	}
+
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 
 	if err != nil {
@@ -251,7 +257,6 @@ func GetAnalyticsHandler(ginCtx *gin.Context) {
 	var monthlySums []MonthlySums
 	var dailySums []DailySums
 	var totalTransactionCount int
-	var callResults []types.CallResult
 	var wg sync.WaitGroup
 
 	wg.Add(7)
@@ -259,91 +264,90 @@ func GetAnalyticsHandler(ginCtx *gin.Context) {
 		defer wg.Done()
 		totalSpentResult, err := queryTotalSpent(user.ID)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryTotalSpent()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryTotalSpent()", nil, http.StatusInternalServerError, err)
 			return
 		}
 
 		totalSpent = totalSpentResult
-		api.MakeCallResults(&callResults, "Railway: queryTotalSpent()", totalSpentResult, http.StatusOK, nil)
+		crc.Add("Railway: queryTotalSpent()", totalSpentResult, http.StatusOK, nil)
 	}()
 	go func() {
 		defer wg.Done()
 		mostFrequentCategoryResult, err := queryMostFrequentCategory(user.ID)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryMostFrequentCategory()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryMostFrequentCategory()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		mostFrequentCategory = mostFrequentCategoryResult
-		api.MakeCallResults(&callResults, "Railway: queryMostFrequentCategory()", mostFrequentCategoryResult, http.StatusOK, nil)
+		crc.Add("Railway: queryMostFrequentCategory()", mostFrequentCategoryResult, http.StatusOK, nil)
 
 	}()
 	go func() {
 		defer wg.Done()
 		highestCategoryResult, categorySums, err := queryHighestCategory(user.ID)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryHighestCategory()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryHighestCategory()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		highestCategory = highestCategoryResult
 		categoryExpense = categorySums
-		api.MakeCallResults(&callResults, "Railway: queryHighestCategory()", highestCategoryResult, http.StatusOK, nil)
-		api.MakeCallResults(&callResults, "Railway: queryHighestCategory()", categorySums, http.StatusOK, nil)
+
+		crc.Add("Railway: queryHighestCategory()", highestCategoryResult, http.StatusOK, nil)
+		crc.Add("Railway: queryHighestCategory()", categorySums, http.StatusOK, nil)
 
 	}()
 	go func() {
 		defer wg.Done()
 		yearlySumsResult, err := queryYearlySums(user.ID)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryYearlySums()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryYearlySums()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		yearlySums = yearlySumsResult
-		api.MakeCallResults(&callResults, "Railway: queryYearlySums()", yearlySumsResult, http.StatusOK, nil)
+		crc.Add("Railway: queryYearlySums()", yearlySumsResult, http.StatusOK, nil)
 
 	}()
 	go func() {
 		defer wg.Done()
 		monthlySumsResult, err := queryMonthlySums(user.ID)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryMonthlySums()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryMonthlySums()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		monthlySums = monthlySumsResult
-		api.MakeCallResults(&callResults, "Railway: queryMonthlySums()", monthlySumsResult, http.StatusOK, nil)
+		crc.Add("Railway: queryMonthlySums()", monthlySumsResult, http.StatusOK, nil)
 
 	}()
 	go func() {
 		defer wg.Done()
 		dailySumsResult, err := queryDailySums(user.ID)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryDailySums()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryDailySums()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		dailySums = dailySumsResult
-		api.MakeCallResults(&callResults, "Railway: queryDailySums()", dailySumsResult, http.StatusOK, nil)
+		crc.Add("Railway: queryDailySums()", dailySumsResult, http.StatusOK, nil)
 
 	}()
 	go func() {
 		defer wg.Done()
 		totalTransactionCountResult, err := queryTotalTransactions(user.ID)
 		if err != nil {
-			api.MakeCallResults(&callResults, "Railway: queryTotalTransactions()", nil, http.StatusInternalServerError, err)
+			crc.Add("Railway: queryTotalTransactions()", nil, http.StatusInternalServerError, err)
 			return
 		}
 		totalTransactionCount = totalTransactionCountResult
-		api.MakeCallResults(&callResults, "Railway: queryTotalTransactions()", totalTransactionCountResult, http.StatusOK, nil)
+		crc.Add("Railway: queryTotalTransactions()", totalTransactionCountResult, http.StatusOK, nil)
 
 	}()
 
 	wg.Wait()
 
-	for _, cr := range callResults {
-		if cr.Error != nil {
-			ginCtx.JSON(http.StatusInternalServerError, gin.H{
-				"callResults": callResults,
-			})
-			return
-		}
+	if crc.HasError() {
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"callResults": crc.CallResults,
+		})
+		return
 	}
 
 	if totalSpent == 0 {
@@ -418,13 +422,13 @@ func GetAnalyticsHandler(ginCtx *gin.Context) {
 	monthlyYearlyData, err := queryYearlyMonthlyData(user.ID)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: queryYearlyMonthlyData()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: queryYearlyMonthlyData()", nil, http.StatusInternalServerError, err)
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
-	api.MakeCallResults(&callResults, "Railway: queryYearlyMonthlyData()", monthlyYearlyData, http.StatusOK, nil)
+	crc.Add("Railway: queryYearlyMonthlyData()", monthlyYearlyData, http.StatusOK, nil)
 
 	sort.Slice(monthlyYearlyData, func(i, j int) bool {
 		return constants.MONTH_ORDER[monthlyYearlyData[i].Month] < constants.MONTH_ORDER[monthlyYearlyData[j].Month]
@@ -528,6 +532,6 @@ func GetAnalyticsHandler(ginCtx *gin.Context) {
 		"categoryData":           categoryChartData,
 		"overviewData":           monthlyBarChartData,
 		"scatterData":            scatterData,
-		"callResults":            callResults,
+		"callResults":            crc.CallResults,
 	})
 }

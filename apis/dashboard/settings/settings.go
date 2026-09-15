@@ -95,6 +95,14 @@ func updateUserSettings(user models.User, update map[string]interface{}) (*int64
 }
 
 func PatchUserEmail(ginCtx *gin.Context) {
+
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err)
+		return
+	}
+
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 
 	if err != nil {
@@ -113,23 +121,23 @@ func PatchUserEmail(ginCtx *gin.Context) {
 		return
 	}
 
-	var callResults []types.CallResult
 	rowsAffected, err := queryUserByEmail(requestBody.Email)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: queryUserByEmail()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: queryUserByEmail()", nil, http.StatusInternalServerError, err)
 
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
 
-	api.MakeCallResults(&callResults, "Railway: queryUserByEmail()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
+	crc.Add("Railway: queryUserByEmail()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
+
 	if *rowsAffected >= 1 {
 		ginCtx.JSON(http.StatusForbidden, gin.H{
 			"error":       "Email Already Exists",
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
@@ -137,28 +145,29 @@ func PatchUserEmail(ginCtx *gin.Context) {
 	queriedUser, err := queryUserByID(user.ID)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: queryUserByID()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: queryUserByID()", nil, http.StatusInternalServerError, err)
+
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
 
-	api.MakeCallResults(&callResults, "Railway: queryUserByID()", *queriedUser, http.StatusOK, nil)
+	crc.Add("Railway: queryUserByID()", *queriedUser, http.StatusOK, nil)
 
 	match, err := argon.ComparePasswordAndHash(requestBody.Password, queriedUser.Password)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Argon: ComparePasswordAndHash()", nil, http.StatusInternalServerError, err)
+		crc.Add("Argon: ComparePasswordAndHash()", nil, http.StatusInternalServerError, err)
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
 	if match == false {
 		ginCtx.JSON(http.StatusForbidden, gin.H{
 			"error":       "Unable to Update Email",
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
@@ -170,17 +179,17 @@ func PatchUserEmail(ginCtx *gin.Context) {
 	rowsAffected, err = updateUserSettings(user, updates)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: updateUserSettings()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: updateUserSettings()", nil, http.StatusInternalServerError, err)
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
 
-	api.MakeCallResults(&callResults, "Railway: updateUserSettings()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
+	crc.Add("Railway: updateUserSettings()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
 
 	ginCtx.JSON(http.StatusOK, gin.H{
-		"callResults": callResults,
+		"callResults": crc.CallResults,
 	})
 }
 
@@ -191,6 +200,14 @@ type PatchUserPasswordRequestBody struct {
 }
 
 func PatchUserPassword(ginCtx *gin.Context) {
+
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err)
+		return
+	}
+
 	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
 
 	if err != nil {
@@ -216,24 +233,24 @@ func PatchUserPassword(ginCtx *gin.Context) {
 		return
 	}
 
-	var callResults []types.CallResult
 	queriedUser, err := queryUserByID(user.ID)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway queryUserByID()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway queryUserByID()", nil, http.StatusInternalServerError, err)
+
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
-	api.MakeCallResults(&callResults, "Railway: queryUserByID()", *queriedUser, http.StatusOK, nil)
+	crc.Add("Railway: queryUserByID()", *queriedUser, http.StatusOK, nil)
 
 	match, err := argon.ComparePasswordAndHash(requestBody.CurrentPassword, queriedUser.Password)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Argon: ComparePasswordAndHash()", nil, http.StatusInternalServerError, err)
+		crc.Add("Argon: ComparePasswordAndHash()", nil, http.StatusInternalServerError, err)
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
@@ -241,7 +258,7 @@ func PatchUserPassword(ginCtx *gin.Context) {
 	if match == false {
 		ginCtx.JSON(http.StatusUnauthorized, gin.H{
 			"error":       "Unable to Update Password",
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
@@ -249,9 +266,9 @@ func PatchUserPassword(ginCtx *gin.Context) {
 	hashedPassword, err := argon.HashPassword(requestBody.Password)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Argon: HashPassword()", nil, http.StatusInternalServerError, err)
+		crc.Add("Argon: HashPassword()", nil, http.StatusInternalServerError, err)
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
@@ -263,16 +280,16 @@ func PatchUserPassword(ginCtx *gin.Context) {
 	rowsAffected, err := updateUserSettings(user, updates)
 
 	if err != nil {
-		api.MakeCallResults(&callResults, "Railway: updateUserSettings()", nil, http.StatusInternalServerError, err)
+		crc.Add("Railway: updateUserSettings()", nil, http.StatusInternalServerError, err)
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{
-			"callResults": callResults,
+			"callResults": crc.CallResults,
 		})
 		return
 	}
 
-	api.MakeCallResults(&callResults, "Railway: updateUserSettings()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
+	crc.Add("Railway: updateUserSettings()", gin.H{"Rows Affected": *rowsAffected}, http.StatusOK, nil)
 
 	ginCtx.JSON(http.StatusOK, gin.H{
-		"callResults": callResults,
+		"callResults": crc.CallResults,
 	})
 }
