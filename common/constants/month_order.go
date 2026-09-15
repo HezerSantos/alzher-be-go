@@ -14,3 +14,8 @@ var MONTH_ORDER = map[string]int{
 	"Nov": 11,
 	"Dec": 12,
 }
+
+var MONTHS = []string{
+	"", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+}

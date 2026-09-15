@@ -14,7 +14,7 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) (*ai.Transaction, error) {
+func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) ([]ai.Transaction, error) {
 	GROQ_API_KEY := os.Getenv("GROQ_API_KEY")
 	GROQ_URL := os.Getenv("GROQ_URL")
 
@@ -63,7 +63,7 @@ func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) (*
 		return nil, nil
 	}
 
-	var transactions ai.Transaction
+	var transactions ai.TransactionResult
 
 	if err := json.Unmarshal(
 		[]byte(resp.Choices[0].Message.Content),
@@ -73,5 +73,5 @@ func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) (*
 		return nil, err
 	}
 
-	return &transactions, nil
+	return transactions.Transactions, nil
 }

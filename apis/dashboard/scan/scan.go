@@ -50,12 +50,12 @@ func queryStatementHash(userId uuid.UUID, fileHash string) (*models.Statements, 
 	return statement, nil
 }
 
-func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallResultContainer, file *multipart.FileHeader, hashSlice []string, userId uuid.UUID) (*ai.Transaction, error) {
+func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallResultContainer, file *multipart.FileHeader, userId uuid.UUID) ([]ai.Transaction, *string, error) {
 
 	f, err := file.Open()
 	if err != nil {
 		crc.Add("processFile(): file.Open()", nil, http.StatusInternalServerError, err)
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 
@@ -63,21 +63,16 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	if err != nil {
 		crc.Add("processFile(): io.ReadAll()", nil, http.StatusInternalServerError, err)
 
-		return nil, err
+		return nil, nil, err
 	}
 
-	var mu sync.Mutex
 	fileHash := hash(contents)
-
-	mu.Lock()
-	hashSlice = append(hashSlice, fileHash)
-	mu.Unlock()
 
 	statement, err := queryStatementHash(userId, fileHash)
 
 	if err != nil {
 		crc.Add("processFile(): queryStatementHash()", nil, http.StatusInternalServerError, err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	crc.Add("processFile(): queryStatementHash()", statement, http.StatusOK, nil)
@@ -86,7 +81,7 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 		cancel()
 		crc.Add("processFile(): queryStatementHash()", statement, http.StatusConflict, fmt.Errorf("Statement Already Exists"))
 		crc.SetStatus(http.StatusConflict)
-		return nil, fmt.Errorf("Statement Already Exists")
+		return nil, nil, fmt.Errorf("Statement Already Exists")
 	}
 
 	// Uses MuPDF engine in-memory — handles Chase, Capital One, and encrypted streams without panicking
@@ -94,7 +89,7 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	if err != nil {
 		crc.Add("processFile(): fitz.NewFromMemory()", nil, http.StatusInternalServerError, err)
 
-		return nil, err
+		return nil, nil, err
 	}
 	defer doc.Close()
 
@@ -104,7 +99,7 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 		if err != nil {
 			crc.Add("processFile(): doc.Text()", nil, http.StatusInternalServerError, err)
 
-			return nil, err
+			return nil, nil, err
 		}
 		textBuilder.WriteString(pageText)
 	}
@@ -114,10 +109,14 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 
 	if err != nil {
 		crc.Add("processFile(): processFile()", nil, http.StatusInternalServerError, err)
-		return nil, err
+		return nil, nil, err
 	}
 
-	return transactions, nil
+	if transactions == nil {
+		return nil, nil, nil
+	}
+
+	return transactions, &fileHash, nil
 }
 
 func PostDashboardDocument(ginCtx *gin.Context) {
@@ -144,13 +143,12 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 
 	files := form.File["files"]
 
-	var transactions []ai.Transaction
+	var transactions = make(map[string][]ai.Transaction)
 
 	var mu sync.Mutex
 
 	var wg sync.WaitGroup
 
-	var hashSlice []string
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for _, file := range files {
@@ -163,16 +161,16 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 			}
 			defer wg.Done()
 
-			transactionResult, err := processFile(ctx, cancel, crc, file, hashSlice, user.ID)
+			transactionResult, fileHash, err := processFile(ctx, cancel, crc, file, user.ID)
 
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				return
 			}
-			if transactionResult != nil {
+			if transactionResult != nil && fileHash != nil {
 				crc.Add(fmt.Sprintf("Groq: File-%s", file.Filename), transactionResult, http.StatusOK, nil)
-				transactions = append(transactions, *transactionResult)
+				transactions[*fileHash] = transactionResult
 			} else {
 				crc.Add(fmt.Sprintf("Groq: File-%s", file.Filename), nil, http.StatusInternalServerError, fmt.Errorf("transaction extraction returned nil result"))
 			}
