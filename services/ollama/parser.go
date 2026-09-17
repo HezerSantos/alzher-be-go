@@ -10,8 +10,20 @@ var (
 		`(?i)\b(?:` +
 			`\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?` +
 			`|` +
-			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*,?\s+\d{1,2}(?:[,\s]+(?:19|20)\d{2})?` +
 			`)\b`,
+	)
+
+	billingPeriodRe = regexp.MustCompile(
+		`(?i)(?:` +
+			`\d{1,2}[/-]\d{1,2}[/-]\d{2,4}` +
+			`\s*[-–]\s*` +
+			`\d{1,2}[/-]\d{1,2}[/-]\d{2,4}` +
+			`|` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*,?\s*\d{1,2}\s*,?\s*(?:19|20)\d{2}` +
+			`\s*[-–]\s*` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*,?\s*\d{1,2}\s*,?\s*(?:19|20)\d{2}` +
+			`)`,
 	)
 
 	amountRe = regexp.MustCompile(
@@ -32,7 +44,11 @@ var (
 
 	transactionRowRe = regexp.MustCompile(
 		`(?i)^\s*` +
-			`\d{1,2}[/-]\d{1,2}` +
+			`(?:` +
+			`\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?` +
+			`|` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*,?\s*\d{1,2}(?:[,\s]+(?:19|20)\d{2})?` +
+			`)` +
 			`\s+.+?\s+` +
 			`(?:` +
 			`(?:minus|plus)\s*\$?[\d,]+\.\d{2}` +
@@ -45,15 +61,15 @@ var (
 	transactionRowWithTwoDatesRe = regexp.MustCompile(
 		`(?i)^\s*` +
 			`(?:` +
-			`\d{1,2}[/-]\d{1,2}` +
+			`\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?` +
 			`|` +
-			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*,?\s*\d{1,2}(?:[,\s]+(?:19|20)\d{2})?` +
 			`)` +
 			`\s+` +
 			`(?:` +
-			`\d{1,2}[/-]\d{1,2}` +
+			`\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?` +
 			`|` +
-			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*,?\s*\d{1,2}(?:[,\s]+(?:19|20)\d{2})?` +
 			`)` +
 			`\s+.+?\s+` +
 			`(?:` +
@@ -72,15 +88,24 @@ func NormalizeStatementText(input string) string {
 
 	var result []string
 
-	// Add normal transaction regions first.
+	// Keep transaction regions.
 	for _, region := range regions {
 		for _, line := range region {
 			result = appendUnique(result, line)
 		}
 	}
 
+	// Keep billing-period information exactly as it appeared.
+	// Groq uses this to infer transaction years when individual
+	// transaction dates do not contain a year.
+	for _, line := range lines {
+		if isBillingPeriodLine(line) {
+			result = appendUnique(result, line)
+		}
+	}
+
 	// Statement totals are independent of transaction regions.
-	// This ensures Groq always has totals available for verification.
+	// This gives Groq the information needed for verification.
 	for _, line := range lines {
 		if isStatementTotal(line) {
 			result = appendUnique(result, line)
@@ -88,8 +113,8 @@ func NormalizeStatementText(input string) string {
 	}
 
 	// Some PDFs collapse multiple transaction rows into one
-	// giant line. Only preserve lines that contain multiple
-	// actual date -> amount transaction patterns.
+	// giant line. Preserve those lines when they contain
+	// multiple actual date -> amount transaction patterns.
 	for _, line := range lines {
 		if isCollapsedTransactionLine(line) {
 			result = appendUnique(result, line)
@@ -198,11 +223,8 @@ func isCollapsedTransactionLine(line string) bool {
 		return false
 	}
 
-	// Find all dates in the line.
 	dates := dateRe.FindAllStringIndex(line, -1)
 
-	// A collapsed transaction row needs at least
-	// two transaction-looking dates.
 	if len(dates) < 2 {
 		return false
 	}
@@ -212,9 +234,6 @@ func isCollapsedTransactionLine(line string) bool {
 	for i, date := range dates {
 		end := len(line)
 
-		// Only inspect the text between this date and
-		// the next date. This prevents unrelated dates
-		// later in a paragraph from being paired together.
 		if i+1 < len(dates) {
 			end = dates[i+1][0]
 		}
@@ -226,8 +245,37 @@ func isCollapsedTransactionLine(line string) bool {
 		}
 	}
 
-	// Require at least two actual date -> amount pairs.
 	return transactionCount >= 2
+}
+
+func isBillingPeriodLine(line string) bool {
+	line = strings.TrimSpace(line)
+
+	if line == "" {
+		return false
+	}
+
+	// First require an actual two-date billing-period pattern.
+	if !billingPeriodRe.MatchString(line) {
+		return false
+	}
+
+	lower := strings.ToLower(line)
+
+	// If the line explicitly identifies itself as a billing/
+	// statement period, keep it.
+	if strings.Contains(lower, "billing") ||
+		strings.Contains(lower, "statement period") ||
+		strings.Contains(lower, "statement cycle") ||
+		strings.Contains(lower, "period") {
+		return true
+	}
+
+	// Some PDFs put only the date range on its own line.
+	// Preserve a standalone two-date range as useful context.
+	matches := dateRe.FindAllString(line, -1)
+
+	return len(matches) >= 2
 }
 
 func extractRegion(lines []string, start, end int) []string {
@@ -269,7 +317,8 @@ func isStatementTotal(line string) bool {
 
 	if (strings.Contains(lower, "transactions") ||
 		strings.Contains(lower, "purchases")) &&
-		strings.Contains(lower, "+") {
+		(strings.Contains(lower, "+") ||
+			strings.Contains(lower, "plus")) {
 		return true
 	}
 
