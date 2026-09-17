@@ -26,6 +26,11 @@ import (
 	"gorm.io/gorm"
 )
 
+var (
+	transactionCache   = map[string][]ai.Transaction{}
+	transactionCacheMu sync.Mutex
+)
+
 func hash(data []byte) string {
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
@@ -68,6 +73,15 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 
 	fileHash := hash(contents)
 
+	transactionCacheMu.Lock()
+
+	if cacheHit, ok := transactionCache[fileHash]; ok == true {
+		transactionCacheMu.Unlock()
+		crc.Add("processFile(): Cache Hit", cacheHit, http.StatusOK, nil)
+		return cacheHit, &fileHash, nil
+	}
+	transactionCacheMu.Unlock()
+
 	statement, err := queryStatementHash(userId, fileHash)
 
 	if err != nil {
@@ -105,6 +119,8 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	}
 
 	normalized := ollama.NormalizeStatementText(textBuilder.String())
+	fmt.Println(normalized)
+	return nil, nil, nil
 	transactions, err := groq.AskGroq(ctx, crc, normalized)
 
 	if err != nil {
@@ -115,6 +131,10 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	if transactions == nil {
 		return nil, nil, nil
 	}
+
+	transactionCacheMu.Lock()
+	transactionCache[fileHash] = transactions
+	transactionCacheMu.Unlock()
 
 	return transactions, &fileHash, nil
 }
@@ -187,8 +207,35 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		return
 	}
 
+	// var predictedTransactions []alzherml.Transaction
+	// var successHashes []string
+	// for h, t := range transactions {
+	// 	wg.Add(1)
+	// 	go func(hash string, t []ai.Transaction) {
+	// 		defer wg.Done()
+	// 		predicted, err := alzherml.FetchTransactionCategories(ctx, t, crc)
+
+	// 		if err != nil {
+	// 			crc.Add("AlzherML: FetchTransactionCategories()", nil, http.StatusInternalServerError, err)
+	// 			return
+	// 		}
+
+	// 		crc.Add("AlzherML: FetchTransactionCategories()", predicted, http.StatusOK, nil)
+	// 		mu.Lock()
+	// 		predictedTransactions = append(predictedTransactions, predicted...)
+	// 		successHashes = append(successHashes, hash)
+	// 		mu.Unlock()
+	// 	}(h, t)
+	// }
+
+	// wg.Wait()
+
+	//TODO: Add query to post success hashes
+	//TOOD: Add query to post success transactions
+
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"transactions": transactions,
-		"callResults":  crc.CallResults,
+		// "predictedTransactions": predictedTransactions,
+		"callResults": crc.CallResults,
 	})
 }

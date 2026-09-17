@@ -41,7 +41,7 @@ func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) ([
 				openai.UserMessage(prompt),
 			},
 			Temperature: openai.Float(0.0),
-			MaxTokens:   openai.Int(4096),
+			MaxTokens:   openai.Int(6000),
 		},
 		option.WithJSONSet("reasoning_effort", "low"),
 	)
