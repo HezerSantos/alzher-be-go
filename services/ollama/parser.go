@@ -14,9 +14,6 @@ var (
 			`)\b`,
 	)
 
-	// Require either a decimal amount or a currency symbol.
-	// This prevents plain integers such as "2026" or "31"
-	// from being treated as transaction amounts.
 	amountRe = regexp.MustCompile(
 		`(?i)(?:` +
 			`[+-]?\s*\$?\d[\d,]*\.\d{2}` +
@@ -28,6 +25,32 @@ var (
 	)
 
 	whitespaceRe = regexp.MustCompile(`\s+`)
+
+	transactionRowRe = regexp.MustCompile(
+		`(?i)^\s*` +
+			`\d{1,2}[/-]\d{1,2}` +
+			`\s+.+?\s+` +
+			`(?:[-+]?\$?\(?[\d,]+\.\d{2}\)?)` +
+			`\s*$`,
+	)
+
+	transactionRowWithTwoDatesRe = regexp.MustCompile(
+		`(?i)^\s*` +
+			`(?:` +
+			`\d{1,2}[/-]\d{1,2}` +
+			`|` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}` +
+			`)` +
+			`\s+` +
+			`(?:` +
+			`\d{1,2}[/-]\d{1,2}` +
+			`|` +
+			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}` +
+			`)` +
+			`\s+.+?\s+` +
+			`(?:[-+]?\$?\(?[\d,]+\.\d{2}\)?)` +
+			`\s*$`,
+	)
 )
 
 func NormalizeStatementText(input string) string {
@@ -37,8 +60,19 @@ func NormalizeStatementText(input string) string {
 
 	var result []string
 
+	// Add transaction regions first.
 	for _, region := range regions {
-		result = append(result, region...)
+		for _, line := range region {
+			result = appendUnique(result, line)
+		}
+	}
+
+	// Statement totals are independent of transaction regions.
+	// This ensures Groq always has totals available for verification.
+	for _, line := range lines {
+		if isStatementTotal(line) {
+			result = appendUnique(result, line)
+		}
 	}
 
 	return strings.Join(result, "\n")
@@ -86,11 +120,6 @@ func findTransactionRegions(lines []string) [][]string {
 			continue
 		}
 
-		// A transaction can have several lines between
-		// its date and amount/description.
-		//
-		// Once we've gone more than 4 lines without seeing
-		// another transaction signal, the region is probably over.
 		if i-lastSignal > 4 {
 			if signalCount >= 2 {
 				region := extractRegion(lines, start, lastSignal+2)
@@ -106,9 +135,9 @@ func findTransactionRegions(lines []string) [][]string {
 		}
 	}
 
-	// Handle a transaction region reaching EOF.
 	if start != -1 && signalCount >= 2 {
 		end := min(len(lines), lastSignal+3)
+
 		region := extractRegion(lines, start, end)
 
 		if len(region) > 0 {
@@ -120,7 +149,33 @@ func findTransactionRegions(lines []string) [][]string {
 }
 
 func isTransactionSignal(line string) bool {
-	return dateRe.MatchString(line) || amountRe.MatchString(line)
+	if isTransactionLine(line) {
+		return true
+	}
+
+	if dateRe.MatchString(line) && !isStatementMetadata(line) {
+		return true
+	}
+
+	return false
+}
+
+func isTransactionLine(line string) bool {
+	line = strings.TrimSpace(line)
+
+	if line == "" {
+		return false
+	}
+
+	if transactionRowRe.MatchString(line) {
+		return true
+	}
+
+	if transactionRowWithTwoDatesRe.MatchString(line) {
+		return true
+	}
+
+	return false
 }
 
 func extractRegion(lines []string, start, end int) []string {
@@ -135,12 +190,99 @@ func extractRegion(lines []string, start, end int) []string {
 			continue
 		}
 
-		if isTransactionSignal(line) || isLikelyDescription(line) {
+		if isTransactionLine(line) {
+			result = appendUnique(result, line)
+			continue
+		}
+
+		if isStatementTotal(line) {
+			result = appendUnique(result, line)
+			continue
+		}
+
+		if isLikelyDescription(line) {
 			result = appendUnique(result, line)
 		}
 	}
 
 	return result
+}
+
+func isStatementTotal(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+
+	if !amountRe.MatchString(line) {
+		return false
+	}
+
+	// Primary statement transaction totals.
+	//
+	// Examples:
+	// Transactions + $931.04
+	// Purchases + $1,245.67
+	// Total Transactions + $931.04
+	// Total Purchases + $1,245.67
+	if (strings.Contains(lower, "transactions") ||
+		strings.Contains(lower, "purchases")) &&
+		strings.Contains(lower, "+") {
+		return true
+	}
+
+	// Some statements don't put the + immediately next to
+	// the label but still clearly identify the transaction total.
+	if strings.HasPrefix(lower, "total transactions") ||
+		strings.HasPrefix(lower, "total purchases") {
+		return true
+	}
+
+	// Preserve combined fee/interest totals because they can
+	// still be useful for statement verification.
+	if strings.Contains(lower, "total fees") &&
+		strings.Contains(lower, "total interest") {
+		return true
+	}
+
+	return false
+}
+
+func isStatementMetadata(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+
+	metadata := []string{
+		"previous balance",
+		"payments",
+		"payments and credits",
+		"other credits",
+		"transactions +",
+		"cash advances",
+		"fees charged",
+		"interest charged",
+		"new balance",
+		"credit limit",
+		"available credit",
+		"credit line",
+		"minimum payment",
+		"payment due date",
+		"total fees",
+		"total interest",
+		"total cashback",
+		"cashback bonus",
+		"total points",
+		"points redeemed",
+		"earned this period",
+		"redeemed this period",
+		"new charges",
+		"past due amount",
+		"balance over the credit limit",
+	}
+
+	for _, phrase := range metadata {
+		if strings.HasPrefix(lower, phrase) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isLikelyDescription(line string) bool {
@@ -150,18 +292,106 @@ func isLikelyDescription(line string) bool {
 		return false
 	}
 
-	// Legal/disclaimer paragraphs are generally much longer.
 	if len(line) > 160 {
 		return false
 	}
 
-	// A pure number is not a description.
-	if amountRe.MatchString(line) && len(strings.Fields(line)) == 1 {
-		return false
+	lower := strings.ToLower(line)
+
+	headerNoise := []string{
+		"account summary",
+		"payment information",
+		"payment and credits",
+		"payments and credits",
+		"payments, credits and adjustments",
+		"transactions",
+		"transactions continued",
+		"standard purchases",
+		"purchases",
+		"fees",
+		"fees charged",
+		"interest",
+		"interest charge",
+		"account notifications",
+		"rewards summary",
+		"rewards",
+		"information for you",
+		"information for you continued",
+		"account messages",
+		"how you earn",
+		"how do we calculate",
+		"payment history",
+		"purchase",
+		"advances",
+		"cash advances",
+		"balance transfers",
+		"statement date",
+		"billing period",
+		"billing cycle",
+		"open to close date",
+		"trans date",
+		"post date",
+		"sale date",
+		"date of transaction",
+		"merchant name or transaction description",
+		"merchant category",
+		"amount",
+		"cardholder summary",
+		"your account messages",
 	}
 
-	// Don't keep obvious document-level text.
-	lower := strings.ToLower(line)
+	for _, phrase := range headerNoise {
+		if lower == phrase || strings.HasPrefix(lower, phrase+" ") {
+			return false
+		}
+	}
+
+	metadataNoise := []string{
+		"previous balance",
+		"payments",
+		"payments and credits",
+		"payment due date",
+		"minimum payment",
+		"minimum payment due",
+		"new balance",
+		"credit limit",
+		"credit line",
+		"credit line available",
+		"available credit",
+		"available credit limit",
+		"cash advance credit limit",
+		"cash advance credit line",
+		"available for cash",
+		"available for cash advances",
+		"cash advances",
+		"cash advance",
+		"balance transfers",
+		"fees charged",
+		"interest charged",
+		"interest charge",
+		"interest charges",
+		"total fees",
+		"total interest",
+		"earned this period",
+		"redeemed this period",
+		"cashback bonus balance",
+		"cashback bonus",
+		"thankyou points",
+		"thankyou points earned",
+		"total points",
+		"points redeemed",
+		"previous points balance",
+		"points available for redemption",
+		"new charges",
+		"past due amount",
+		"balance over the credit limit",
+	}
+
+	for _, phrase := range metadataNoise {
+		if strings.HasPrefix(lower, phrase) {
+			return false
+		}
+	}
 
 	noise := []string{
 		"page ",
@@ -178,19 +408,58 @@ func isLikelyDescription(line string) bool {
 		"interest charge",
 		"minimum payment",
 		"payment due",
-		"previous balance",
-		"new balance",
-		"available credit",
-		"credit limit",
-		"total transactions",
-		"total interest",
-		"year-to-date",
-		"amount enclosed",
+		"late payment warning",
+		"for online and phone payments",
+		"upcoming statement closing date",
+		"if you make no additional charges",
+		"you will pay off",
+		"estimated total",
+		"credit counseling",
+		"call 888-",
+		"call 1-",
+		"cardmember since",
+		"member since",
+		"account ending in",
+		"your fico",
+		"score range",
+		"score ingredients",
+		"see your cardmember agreement",
+		"cardmember agreement",
+		"to make changes",
+		"report immediately",
+		"sending cash is not allowed",
+		"processing of your allowable",
+		"payments received",
+		"paymentsreceived",
+		"paymentto",
+		"payment to",
+		"discover may monitor",
+		"the discover card is issued",
+		"issued by discover bank",
+		"for undeliverable mail only",
 		"po box",
 		"copyright",
 		"how do i",
 		"how can i",
 		"your rights",
+		"how is the interest charge",
+		"how do we calculate",
+		"do you assess a minimum interest",
+		"we use a method called",
+		"average daily balance",
+		"prime rate",
+		"libor",
+		"when your apr",
+		"apr will change",
+		"activate your",
+		"learn more",
+		"visit ",
+		"download our app",
+		"mobile app",
+		"online payments",
+		"pay your bill",
+		"see key factors",
+		"see your score",
 	}
 
 	for _, phrase := range noise {
@@ -199,13 +468,100 @@ func isLikelyDescription(line string) bool {
 		}
 	}
 
+	if looksLikeAddressOrAccountInfo(line) {
+		return false
+	}
+
+	fields := strings.Fields(line)
+
+	if len(fields) == 1 {
+		if amountRe.MatchString(line) {
+			return false
+		}
+
+		if isNumericLike(line) {
+			return false
+		}
+	}
+
+	if looksLikeRateLine(lower) {
+		return false
+	}
+
 	return true
+}
+
+func looksLikeAddressOrAccountInfo(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+
+	if strings.Contains(lower, "account") ||
+		strings.Contains(lower, "hezer santos") ||
+		strings.Contains(lower, "card ending") ||
+		strings.Contains(lower, "member since") {
+		return true
+	}
+
+	addressPrefixes := []string{
+		"po box",
+		"p.o. box",
+	}
+
+	for _, prefix := range addressPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isNumericLike(line string) bool {
+	line = strings.TrimSpace(line)
+
+	if line == "" {
+		return false
+	}
+
+	for _, r := range line {
+		if (r < '0' || r > '9') &&
+			r != '.' &&
+			r != ',' &&
+			r != '/' &&
+			r != '-' &&
+			r != '+' &&
+			r != '$' {
+			return false
+		}
+	}
+
+	return true
+}
+
+func looksLikeRateLine(lower string) bool {
+	rateTerms := []string{
+		"apr",
+		"prime rate",
+		"libor",
+		"periodic rate",
+		"introductory rate",
+		"standard purch",
+		"standard adv",
+		"cash advances",
+		"balance transfers",
+	}
+
+	for _, term := range rateTerms {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isNoise(line string) bool {
 	lower := strings.ToLower(line)
 
-	// Repeated PDF artifacts / legal boilerplate.
 	noise := []string{
 		"additional information on the next page",
 		"please visit",
