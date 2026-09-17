@@ -15,6 +15,7 @@ import (
 	"github.com/HezerSantos/alzher-api/common/api"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
 	"github.com/HezerSantos/alzher-api/common/userinfo"
+	alzherml "github.com/HezerSantos/alzher-api/services/alzher-ml"
 	"github.com/HezerSantos/alzher-api/services/common/ai"
 	"github.com/HezerSantos/alzher-api/services/groq"
 	"github.com/HezerSantos/alzher-api/services/ollama"
@@ -119,8 +120,8 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	}
 
 	normalized := ollama.NormalizeStatementText(textBuilder.String())
-	fmt.Println(normalized)
-	return nil, nil, nil
+	// fmt.Println(normalized)
+	// return nil, nil, nil
 	transactions, err := groq.AskGroq(ctx, crc, normalized)
 
 	if err != nil {
@@ -207,35 +208,41 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		return
 	}
 
-	// var predictedTransactions []alzherml.Transaction
-	// var successHashes []string
-	// for h, t := range transactions {
-	// 	wg.Add(1)
-	// 	go func(hash string, t []ai.Transaction) {
-	// 		defer wg.Done()
-	// 		predicted, err := alzherml.FetchTransactionCategories(ctx, t, crc)
+	var predictedTransactions []alzherml.Transaction
+	var successHashes []string
+	for h, t := range transactions {
+		wg.Add(1)
+		go func(hash string, t []ai.Transaction) {
+			defer wg.Done()
+			predicted, err := alzherml.FetchTransactionCategories(ctx, t, crc)
 
-	// 		if err != nil {
-	// 			crc.Add("AlzherML: FetchTransactionCategories()", nil, http.StatusInternalServerError, err)
-	// 			return
-	// 		}
+			if err != nil {
+				crc.Add("AlzherML: FetchTransactionCategories()", nil, http.StatusInternalServerError, err)
+				return
+			}
 
-	// 		crc.Add("AlzherML: FetchTransactionCategories()", predicted, http.StatusOK, nil)
-	// 		mu.Lock()
-	// 		predictedTransactions = append(predictedTransactions, predicted...)
-	// 		successHashes = append(successHashes, hash)
-	// 		mu.Unlock()
-	// 	}(h, t)
-	// }
+			crc.Add("AlzherML: FetchTransactionCategories()", predicted, http.StatusOK, nil)
+			mu.Lock()
+			predictedTransactions = append(predictedTransactions, predicted...)
+			successHashes = append(successHashes, hash)
+			mu.Unlock()
+		}(h, t)
+	}
 
-	// wg.Wait()
+	wg.Wait()
 
+	if crc.HasError() {
+		ginCtx.JSON(crc.Status(), gin.H{
+			"callResults": crc.CallResults,
+		})
+		return
+	}
 	//TODO: Add query to post success hashes
 	//TOOD: Add query to post success transactions
 
 	ginCtx.JSON(http.StatusOK, gin.H{
-		"transactions": transactions,
-		// "predictedTransactions": predictedTransactions,
-		"callResults": crc.CallResults,
+		"transactions":          transactions,
+		"predictedTransactions": predictedTransactions,
+		"callResults":           crc.CallResults,
 	})
 }

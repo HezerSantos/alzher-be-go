@@ -135,7 +135,8 @@ func FetchTransactionCategories(ctx context.Context, transactions []ai.Transacti
 	}
 
 	if res.StatusCode >= 400 {
-		crc.Add("AlzherML: FetchTransactionCategories()", bodyBytes, res.StatusCode, fmt.Errorf("Alzher ML Failure"))
+		crc.SetStatus(res.StatusCode)
+		crc.Add("AlzherML: FetchTransactionCategories()", string(bodyBytes), res.StatusCode, fmt.Errorf("Alzher ML Failure"))
 		return nil, fmt.Errorf("Alzher ML Failure")
 	}
 
