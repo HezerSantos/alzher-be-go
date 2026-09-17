@@ -16,9 +16,13 @@ var (
 
 	amountRe = regexp.MustCompile(
 		`(?i)(?:` +
+			`(?:minus|plus)\s*\$?\d[\d,]*\.\d{2}` +
+			`|` +
 			`[+-]?\s*\$?\d[\d,]*\.\d{2}` +
 			`|` +
 			`\(\s*\$?\d[\d,]*\.\d{2}\s*\)` +
+			`|` +
+			`(?:minus|plus)\s*\$?\d[\d,]*(?:\.\d{2})?` +
 			`|` +
 			`[+-]?\s*\$\d[\d,]*(?:\.\d{2})?` +
 			`)`,
@@ -30,7 +34,11 @@ var (
 		`(?i)^\s*` +
 			`\d{1,2}[/-]\d{1,2}` +
 			`\s+.+?\s+` +
-			`(?:[-+]?\$?\(?[\d,]+\.\d{2}\)?)` +
+			`(?:` +
+			`(?:minus|plus)\s*\$?[\d,]+\.\d{2}` +
+			`|` +
+			`[-+]?\$?\(?[\d,]+\.\d{2}\)?` +
+			`)` +
 			`\s*$`,
 	)
 
@@ -48,7 +56,11 @@ var (
 			`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}` +
 			`)` +
 			`\s+.+?\s+` +
-			`(?:[-+]?\$?\(?[\d,]+\.\d{2}\)?)` +
+			`(?:` +
+			`(?:minus|plus)\s*\$?[\d,]+\.\d{2}` +
+			`|` +
+			`[-+]?\$?\(?[\d,]+\.\d{2}\)?` +
+			`)` +
 			`\s*$`,
 	)
 )
@@ -60,7 +72,7 @@ func NormalizeStatementText(input string) string {
 
 	var result []string
 
-	// Add transaction regions first.
+	// Add normal transaction regions first.
 	for _, region := range regions {
 		for _, line := range region {
 			result = appendUnique(result, line)
@@ -71,6 +83,15 @@ func NormalizeStatementText(input string) string {
 	// This ensures Groq always has totals available for verification.
 	for _, line := range lines {
 		if isStatementTotal(line) {
+			result = appendUnique(result, line)
+		}
+	}
+
+	// Some PDFs collapse multiple transaction rows into one
+	// giant line. Only preserve lines that contain multiple
+	// actual date -> amount transaction patterns.
+	for _, line := range lines {
+		if isCollapsedTransactionLine(line) {
 			result = appendUnique(result, line)
 		}
 	}
@@ -149,15 +170,7 @@ func findTransactionRegions(lines []string) [][]string {
 }
 
 func isTransactionSignal(line string) bool {
-	if isTransactionLine(line) {
-		return true
-	}
-
-	if dateRe.MatchString(line) && !isStatementMetadata(line) {
-		return true
-	}
-
-	return false
+	return isTransactionLine(line)
 }
 
 func isTransactionLine(line string) bool {
@@ -176,6 +189,45 @@ func isTransactionLine(line string) bool {
 	}
 
 	return false
+}
+
+func isCollapsedTransactionLine(line string) bool {
+	line = strings.TrimSpace(line)
+
+	if line == "" {
+		return false
+	}
+
+	// Find all dates in the line.
+	dates := dateRe.FindAllStringIndex(line, -1)
+
+	// A collapsed transaction row needs at least
+	// two transaction-looking dates.
+	if len(dates) < 2 {
+		return false
+	}
+
+	transactionCount := 0
+
+	for i, date := range dates {
+		end := len(line)
+
+		// Only inspect the text between this date and
+		// the next date. This prevents unrelated dates
+		// later in a paragraph from being paired together.
+		if i+1 < len(dates) {
+			end = dates[i+1][0]
+		}
+
+		segment := line[date[1]:end]
+
+		if amountRe.MatchString(segment) {
+			transactionCount++
+		}
+	}
+
+	// Require at least two actual date -> amount pairs.
+	return transactionCount >= 2
 }
 
 func extractRegion(lines []string, start, end int) []string {
@@ -215,28 +267,17 @@ func isStatementTotal(line string) bool {
 		return false
 	}
 
-	// Primary statement transaction totals.
-	//
-	// Examples:
-	// Transactions + $931.04
-	// Purchases + $1,245.67
-	// Total Transactions + $931.04
-	// Total Purchases + $1,245.67
 	if (strings.Contains(lower, "transactions") ||
 		strings.Contains(lower, "purchases")) &&
 		strings.Contains(lower, "+") {
 		return true
 	}
 
-	// Some statements don't put the + immediately next to
-	// the label but still clearly identify the transaction total.
 	if strings.HasPrefix(lower, "total transactions") ||
 		strings.HasPrefix(lower, "total purchases") {
 		return true
 	}
 
-	// Preserve combined fee/interest totals because they can
-	// still be useful for statement verification.
 	if strings.Contains(lower, "total fees") &&
 		strings.Contains(lower, "total interest") {
 		return true
