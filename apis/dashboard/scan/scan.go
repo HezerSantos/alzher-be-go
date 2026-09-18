@@ -120,8 +120,8 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	}
 
 	normalized := ollama.NormalizeStatementText(textBuilder.String())
-	// fmt.Println(normalized)
-	// return nil, nil, nil
+	fmt.Println(normalized)
+	return nil, nil, nil
 	transactions, err := groq.AskGroq(ctx, crc, normalized)
 
 	if err != nil {
@@ -139,6 +139,68 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 
 	return transactions, &fileHash, nil
 }
+
+// func mutateStatementHashes(userId uuid.UUID, fileHashes []string) error {
+
+// 	statements := make([]models.Statement, len(fileHashes))
+
+// 	for i, s := range fileHashes {
+// 		uuid, err := uuid.NewV6()
+
+// 		if err != nil {
+// 			return err
+// 		}
+// 		statements[i] = models.Statement{
+// 			ID:          uuid,
+// 			StatementID: s,
+// 			UserID:      userId,
+// 		}
+// 	}
+
+// 	err := railway.DB.CreateInBatches(&statements, 5).Error
+
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	return nil
+// }
+
+// func mutateTransactions(userId uuid.UUID, predictedTransactions map[string][]alzherml.Transaction) ([]string, error) {
+
+// 	var transactions []models.Transaction
+// 	var fileHashes []string
+// 	for hash, tSlice := range predictedTransactions {
+// 		fileHashes = append(fileHashes, hash)
+// 		for _, t := range tSlice {
+// 			uuid, err := uuid.NewV6()
+
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 			transactions = append(transactions, models.Transaction{
+// 				ID:          uuid,
+// 				Category:    t.Category,
+// 				Description: t.Description,
+// 				Amount:      t.Price,
+// 				Day:         t.Day,
+// 				Month:       t.Month,
+// 				Year:        t.Year,
+// 				UserID:      userId,
+// 				StatementID: hash,
+// 			})
+// 		}
+// 	}
+
+// 	err := railway.DB.CreateInBatches(&transactions, 5).Error
+
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	return fileHashes, nil
+
+// }
 
 func PostDashboardDocument(ginCtx *gin.Context) {
 
@@ -208,8 +270,8 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		return
 	}
 
-	var predictedTransactions []alzherml.Transaction
-	var successHashes []string
+	var predictedTransactions map[string][]alzherml.Transaction
+
 	for h, t := range transactions {
 		wg.Add(1)
 		go func(hash string, t []ai.Transaction) {
@@ -223,8 +285,7 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 
 			crc.Add("AlzherML: FetchTransactionCategories()", predicted, http.StatusOK, nil)
 			mu.Lock()
-			predictedTransactions = append(predictedTransactions, predicted...)
-			successHashes = append(successHashes, hash)
+			predictedTransactions[hash] = predicted
 			mu.Unlock()
 		}(h, t)
 	}
@@ -237,8 +298,25 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		})
 		return
 	}
-	//TODO: Add query to post success hashes
-	//TOOD: Add query to post success transactions
+
+	// fileHashes, err := mutateTransactions(user.ID, predictedTransactions)
+
+	// if err != nil {
+	// 	crc.Add("Railway: mutateTransactions()", nil, http.StatusInternalServerError, err)
+	// 	ginCtx.JSON(crc.Status(), gin.H{
+	// 		"callResults": crc.CallResults,
+	// 	})
+	// 	return
+	// }
+
+	// err = mutateStatementHashes(user.ID, fileHashes)
+	// if err != nil {
+	// 	crc.Add("Railway: mutateStatementHashes()", nil, http.StatusInternalServerError, err)
+	// 	ginCtx.JSON(crc.Status(), gin.H{
+	// 		"callResults": crc.CallResults,
+	// 	})
+	// 	return
+	// }
 
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"transactions":          transactions,

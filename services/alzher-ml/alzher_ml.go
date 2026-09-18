@@ -93,6 +93,8 @@ func FetchTransactionCategories(ctx context.Context, transactions []ai.Transacti
 		return nil, fmt.Errorf("Alzher ML API KEY Not Configured")
 	}
 
+	url := ALZHER_ML_URL + "/dashboard/scan/predict/v2"
+
 	formattedTransactions, err := formatTransactions(transactions)
 
 	if err != nil {
@@ -111,7 +113,7 @@ func FetchTransactionCategories(ctx context.Context, transactions []ai.Transacti
 
 	bytesReader := bytes.NewReader(jsonBytes)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ALZHER_ML_URL, bytesReader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytesReader)
 
 	if err != nil {
 		return nil, err
