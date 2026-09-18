@@ -18,7 +18,6 @@ import (
 	alzherml "github.com/HezerSantos/alzher-api/services/alzher-ml"
 	"github.com/HezerSantos/alzher-api/services/common/ai"
 	"github.com/HezerSantos/alzher-api/services/groq"
-	"github.com/HezerSantos/alzher-api/services/ollama"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
 	"github.com/gen2brain/go-fitz"
@@ -74,15 +73,6 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 
 	fileHash := hash(contents)
 
-	transactionCacheMu.Lock()
-
-	if cacheHit, ok := transactionCache[fileHash]; ok == true {
-		transactionCacheMu.Unlock()
-		crc.Add("processFile(): Cache Hit", cacheHit, http.StatusOK, nil)
-		return cacheHit, &fileHash, nil
-	}
-	transactionCacheMu.Unlock()
-
 	statement, err := queryStatementHash(userId, fileHash)
 
 	if err != nil {
@@ -98,6 +88,15 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 		crc.SetStatus(http.StatusConflict)
 		return nil, nil, fmt.Errorf("Statement Already Exists")
 	}
+
+	transactionCacheMu.Lock()
+
+	if cacheHit, ok := transactionCache[fileHash]; ok == true {
+		transactionCacheMu.Unlock()
+		crc.Add("processFile(): Cache Hit", cacheHit, http.StatusOK, nil)
+		return cacheHit, &fileHash, nil
+	}
+	transactionCacheMu.Unlock()
 
 	// Uses MuPDF engine in-memory — handles Chase, Capital One, and encrypted streams without panicking
 	doc, err := fitz.NewFromMemory(contents)
@@ -119,9 +118,9 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 		textBuilder.WriteString(pageText)
 	}
 
-	normalized := ollama.NormalizeStatementText(textBuilder.String())
-	fmt.Println(normalized)
-	return nil, nil, nil
+	normalized := ai.NormalizeStatementText(textBuilder.String())
+	// fmt.Println(normalized)
+	// return nil, nil, nil
 	transactions, err := groq.AskGroq(ctx, crc, normalized)
 
 	if err != nil {
@@ -140,67 +139,67 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	return transactions, &fileHash, nil
 }
 
-// func mutateStatementHashes(userId uuid.UUID, fileHashes []string) error {
+func mutateStatementHashes(userId uuid.UUID, fileHashes []string) error {
 
-// 	statements := make([]models.Statement, len(fileHashes))
+	statements := make([]models.Statements, len(fileHashes))
 
-// 	for i, s := range fileHashes {
-// 		uuid, err := uuid.NewV6()
+	for i, s := range fileHashes {
+		uuid, err := uuid.NewV6()
 
-// 		if err != nil {
-// 			return err
-// 		}
-// 		statements[i] = models.Statement{
-// 			ID:          uuid,
-// 			StatementID: s,
-// 			UserID:      userId,
-// 		}
-// 	}
+		if err != nil {
+			return err
+		}
+		statements[i] = models.Statements{
+			ID:          uuid,
+			StatementID: s,
+			UserID:      userId,
+		}
+	}
 
-// 	err := railway.DB.CreateInBatches(&statements, 5).Error
+	err := railway.DB.CreateInBatches(&statements, 5).Error
 
-// 	if err != nil {
-// 		return err
-// 	}
+	if err != nil {
+		return err
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
-// func mutateTransactions(userId uuid.UUID, predictedTransactions map[string][]alzherml.Transaction) ([]string, error) {
+func mutateTransactions(userId uuid.UUID, predictedTransactions map[string][]alzherml.Transaction) ([]string, error) {
 
-// 	var transactions []models.Transaction
-// 	var fileHashes []string
-// 	for hash, tSlice := range predictedTransactions {
-// 		fileHashes = append(fileHashes, hash)
-// 		for _, t := range tSlice {
-// 			uuid, err := uuid.NewV6()
+	var transactions []models.Transaction
+	var fileHashes []string
+	for hash, tSlice := range predictedTransactions {
+		fileHashes = append(fileHashes, hash)
+		for _, t := range tSlice {
+			uuid, err := uuid.NewV6()
 
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			transactions = append(transactions, models.Transaction{
-// 				ID:          uuid,
-// 				Category:    t.Category,
-// 				Description: t.Description,
-// 				Amount:      t.Price,
-// 				Day:         t.Day,
-// 				Month:       t.Month,
-// 				Year:        t.Year,
-// 				UserID:      userId,
-// 				StatementID: hash,
-// 			})
-// 		}
-// 	}
+			if err != nil {
+				return nil, err
+			}
+			transactions = append(transactions, models.Transaction{
+				ID:          uuid,
+				Category:    t.Category,
+				Description: t.Description,
+				Amount:      t.Price,
+				Day:         t.Day,
+				Month:       t.Month,
+				Year:        t.Year,
+				UserID:      userId,
+				StatementID: hash,
+			})
+		}
+	}
 
-// 	err := railway.DB.CreateInBatches(&transactions, 5).Error
+	err := railway.DB.CreateInBatches(&transactions, 5).Error
 
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	if err != nil {
+		return nil, err
+	}
 
-// 	return fileHashes, nil
+	return fileHashes, nil
 
-// }
+}
 
 func PostDashboardDocument(ginCtx *gin.Context) {
 
@@ -270,7 +269,7 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		return
 	}
 
-	var predictedTransactions map[string][]alzherml.Transaction
+	predictedTransactions := map[string][]alzherml.Transaction{}
 
 	for h, t := range transactions {
 		wg.Add(1)
@@ -299,24 +298,24 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		return
 	}
 
-	// fileHashes, err := mutateTransactions(user.ID, predictedTransactions)
+	fileHashes, err := mutateTransactions(user.ID, predictedTransactions)
 
-	// if err != nil {
-	// 	crc.Add("Railway: mutateTransactions()", nil, http.StatusInternalServerError, err)
-	// 	ginCtx.JSON(crc.Status(), gin.H{
-	// 		"callResults": crc.CallResults,
-	// 	})
-	// 	return
-	// }
+	if err != nil {
+		crc.Add("Railway: mutateTransactions()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(crc.Status(), gin.H{
+			"callResults": crc.CallResults,
+		})
+		return
+	}
 
-	// err = mutateStatementHashes(user.ID, fileHashes)
-	// if err != nil {
-	// 	crc.Add("Railway: mutateStatementHashes()", nil, http.StatusInternalServerError, err)
-	// 	ginCtx.JSON(crc.Status(), gin.H{
-	// 		"callResults": crc.CallResults,
-	// 	})
-	// 	return
-	// }
+	err = mutateStatementHashes(user.ID, fileHashes)
+	if err != nil {
+		crc.Add("Railway: mutateStatementHashes()", nil, http.StatusInternalServerError, err)
+		ginCtx.JSON(crc.Status(), gin.H{
+			"callResults": crc.CallResults,
+		})
+		return
+	}
 
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"transactions":          transactions,

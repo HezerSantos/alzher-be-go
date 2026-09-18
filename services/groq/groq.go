@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/HezerSantos/alzher-api/common/api"
 	"github.com/HezerSantos/alzher-api/services/common/ai"
@@ -36,7 +37,7 @@ func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) ([
 	resp, err := client.Chat.Completions.New(
 		ctx,
 		openai.ChatCompletionNewParams{
-			Model: "openai/gpt-oss-20b",
+			Model: GB.ReturnModel(),
 			Messages: []openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(prompt),
 			},
@@ -74,4 +75,30 @@ func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) ([
 	}
 
 	return transactions.Transactions, nil
+}
+
+type GroqBase struct {
+	ModelOne string
+	ModelTwo string
+	Mu       sync.Mutex
+	Flag     bool
+}
+
+func (gb *GroqBase) ReturnModel() string {
+	gb.Mu.Lock()
+	if gb.Flag {
+		gb.Flag = !gb.Flag
+		gb.Mu.Unlock()
+		return gb.ModelOne
+	} else {
+		gb.Flag = !gb.Flag
+		gb.Mu.Unlock()
+		return gb.ModelTwo
+	}
+}
+
+var GB = GroqBase{
+	ModelOne: "openai/gpt-oss-20b",
+	ModelTwo: "openai/gpt-oss-120b",
+	Flag:     true,
 }
