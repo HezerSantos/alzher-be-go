@@ -61,7 +61,7 @@ type PatchUserEmailRequestBody struct {
 	Password string `json:"password" binding:"required"`
 }
 
-func queryUserByEmail(email string) (*int64, error) {
+func QueryUserByEmail(email string) (*int64, error) {
 	var user models.User
 	result := railway.DB.Model(&models.User{}).Where(`"email" = ?`, email).First(&user)
 
@@ -121,7 +121,7 @@ func PatchUserEmail(ginCtx *gin.Context) {
 		return
 	}
 
-	rowsAffected, err := queryUserByEmail(requestBody.Email)
+	rowsAffected, err := QueryUserByEmail(requestBody.Email)
 
 	if err != nil {
 		crc.Add("Railway: queryUserByEmail()", nil, http.StatusInternalServerError, err)

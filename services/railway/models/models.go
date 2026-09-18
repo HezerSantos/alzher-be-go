@@ -16,7 +16,7 @@ type Statements struct {
 type User struct {
 	ID        uuid.UUID `gorm:"column:id;type:text;primaryKey"`
 	Email     string    `gorm:"column:email"`
-	Password  string    `gorm:"column:password"`
+	Password  string    `json:"-" gorm:"column:password"`
 	CreatedAt time.Time `gorm:"column:createdAt"`
 }
 
