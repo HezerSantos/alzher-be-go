@@ -26,18 +26,19 @@ type VerifyUserJSON struct {
 }
 
 func GetAuthTokenHandler(ginCtx *gin.Context) {
-	var verifyUserJson VerifyUserJSON
-	err := ginCtx.ShouldBind(&verifyUserJson)
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
 
 	if err != nil {
-		errorfuncs.ErrorHelper(
-			ginCtx,
-			errorfuncs.JsonError{
-				Message: "JSON ERROR 001",
-				Status:  400,
-				Json:    errorfuncs.JsonResponseType{Code: "INVALID_BODY", Msg: "JSON ERROR 001"},
-			},
-		)
+		errorfuncs.NetworkError(ginCtx, err, nil)
+		return
+	}
+
+	var verifyUserJson VerifyUserJSON
+	err = ginCtx.ShouldBind(&verifyUserJson)
+
+	if err != nil {
+		crc.Add("ginCtx: ShouldBind()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
 		return
 	}
 
@@ -47,20 +48,15 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 
 	//Error if record not found
 	if errorCheck.Is(result.Error, gorm.ErrRecordNotFound) {
-		errorfuncs.ErrorHelper(
-			ginCtx,
-			errorfuncs.JsonError{
-				Message: "User not found (Email)",
-				Status:  404,
-				Json:    errorfuncs.JsonResponseType{Code: "INVALID_USER", Msg: "User not found"},
-			},
-		)
+		crc.Add("Railway: queryUserByEmail()", nil, http.StatusBadRequest, result.Error)
+		errorfuncs.BadRequestError(ginCtx, crc)
 		return
 	}
 
 	//Network error
 	if result.Error != nil {
-		errorfuncs.NetworkError(ginCtx, result.Error)
+		crc.Add("Railway: queryUserByEmail()", nil, http.StatusInternalServerError, result.Error)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
 		return
 	}
 
@@ -68,26 +64,21 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 	passwordResult, err := argon.ComparePasswordAndHash(verifyUserJson.Password, user.Password)
 
 	if err != nil {
-		errorfuncs.NetworkError(ginCtx, err)
+		crc.Add("Argon: ComparePasswordAndHash()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
 		return
 	}
 
 	if !passwordResult {
-		errorfuncs.ErrorHelper(
-			ginCtx,
-			errorfuncs.JsonError{
-				Message: "User not found (Passwords)",
-				Status:  404,
-				Json:    errorfuncs.JsonResponseType{Code: "INVALID_USER", Msg: "User not found"},
-			},
-		)
+		errorfuncs.UnauthorizedError(ginCtx)
 		return
 	}
 
 	jwtToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 1)
 
 	if err != nil {
-		errorfuncs.NetworkError(ginCtx, err)
+		crc.Add("JWT: GenerateUserJWT()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
 		return
 	}
 
@@ -107,7 +98,7 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 		true,
 	)
 
-	ginCtx.JSON(200, gin.H{"msg": "User Logged In"})
+	ginCtx.JSON(200, gin.H{"message": "User Logged In"})
 }
 
 type CreateUserRequestBody struct {

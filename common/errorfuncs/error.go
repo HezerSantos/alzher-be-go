@@ -2,7 +2,9 @@ package errorfuncs
 
 import (
 	"fmt"
+	"net/http"
 
+	"github.com/HezerSantos/alzher-api/common/api"
 	"github.com/gin-gonic/gin"
 )
 
@@ -25,20 +27,29 @@ func ErrorHelper(c *gin.Context, j JsonError) {
 	})
 }
 
-func NetworkError(c *gin.Context, error error) {
-	fmt.Printf("\t%s\n\t%s", "Internal Server Error", error)
-	c.JSON(500, gin.H{
-		"msg":  "Internal Server Error",
-		"code": "INVALID_SERVER",
+func NetworkError(ginCtx *gin.Context, err error, crc *api.CallResultContainer) {
+	if err != nil {
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error",
+			"error":   err.Error(),
+		})
+	} else {
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{
+			"message":     "Internal Server Error",
+			"callResults": crc.CallResults,
+		})
+	}
+}
+
+func UnauthorizedError(ginCtx *gin.Context) {
+	ginCtx.JSON(http.StatusInternalServerError, gin.H{
+		"message": "Unauthorized",
 	})
 }
 
-func UnauthorizedError(c *gin.Context) {
-	ErrorHelper(c,
-		JsonError{
-			Message: "Unauthorized",
-			Status:  401,
-			Json:    JsonResponseType{Code: "INVALID_ACCESS", Msg: "Unauthorized"},
-		},
-	)
+func BadRequestError(ginCtx *gin.Context, crc *api.CallResultContainer) {
+	ginCtx.JSON(http.StatusInternalServerError, gin.H{
+		"message":     "Bad Request",
+		"callResults": crc.CallResults,
+	})
 }

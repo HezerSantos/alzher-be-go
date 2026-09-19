@@ -77,7 +77,7 @@ func GetActivityHandler(ginCtx *gin.Context) {
 	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
 
 	if err != nil {
-		errorfuncs.NetworkError(ginCtx, err)
+		errorfuncs.NetworkError(ginCtx, err, nil)
 		return
 	}
 
@@ -229,7 +229,7 @@ func DeleteActivityByIDHandler(ginCtx *gin.Context) {
 	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
 
 	if err != nil {
-		errorfuncs.NetworkError(ginCtx, err)
+		errorfuncs.NetworkError(ginCtx, err, nil)
 		return
 	}
 
@@ -337,7 +337,7 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
 
 	if err != nil {
-		errorfuncs.NetworkError(ginCtx, err)
+		errorfuncs.NetworkError(ginCtx, err, nil)
 		return
 	}
 

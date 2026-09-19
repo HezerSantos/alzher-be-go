@@ -238,7 +238,7 @@ func GetAnalyticsHandler(ginCtx *gin.Context) {
 	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
 
 	if err != nil {
-		errorfuncs.NetworkError(ginCtx, err)
+		errorfuncs.NetworkError(ginCtx, err, nil)
 		return
 	}
 
