@@ -1,10 +1,13 @@
 package auth
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/HezerSantos/alzher-api/middleware"
+	"github.com/gin-gonic/gin"
+)
 
 func ConnectAuthRouter(r *gin.RouterGroup) {
 	auth := r.Group("/auth")
-	auth.POST("/login", GetAuthTokenHandler)
-	auth.POST("/signup", CreateUserHandler)
-	auth.POST("/logout", LogoutUserHandler)
+	auth.POST("/login", middleware.RateLimit(5, 10), GetAuthTokenHandler)
+	auth.POST("/signup", middleware.RateLimit(5, 10), CreateUserHandler)
+	auth.POST("/logout", middleware.RateLimit(5, 10), LogoutUserHandler)
 }
