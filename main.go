@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 
+	"github.com/HezerSantos/alzher-api/common/cors"
 	"github.com/HezerSantos/alzher-api/middleware"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/gin-gonic/gin"
@@ -63,5 +65,7 @@ func main() {
 	api := r.Group("/api", middleware.AttatchContext())
 	ConnectRouter(api)
 
-	r.Run(":8080")
+	if err := http.ListenAndServe(":8080", cors.CorsHandler.Handler(r)); err != nil {
+		panic(err)
+	}
 }
