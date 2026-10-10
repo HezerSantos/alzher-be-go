@@ -13,6 +13,7 @@ import (
 	"github.com/HezerSantos/alzher-api/common/argon"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
 	"github.com/HezerSantos/alzher-api/common/jwt"
+	"github.com/HezerSantos/alzher-api/middleware"
 	"github.com/HezerSantos/alzher-api/services/railway"
 	"github.com/HezerSantos/alzher-api/services/railway/models"
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,15 @@ import (
 type VerifyUserJSON struct {
 	Email    string `json:"email" binding:"email,required"`
 	Password string `json:"password" binding:"required"`
+}
+
+type ReauthResponse struct {
+	UserID      uuid.UUID          `json:"userId"`
+	Email       string             `json:"email"`
+	Token       string             `json:"token"`
+	ExpiresAt   int64              `json:"expiresAt"`
+	IssuedAt    int64              `json:"issuedAt"`
+	CallResults []types.CallResult `json:"callResults"`
 }
 
 func GetAuthTokenHandler(ginCtx *gin.Context) {
@@ -74,7 +84,15 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	jwtToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 1)
+	refreshToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 7, time.Hour*24, "SECURE_REFRESH_SECRET")
+
+	if err != nil {
+		crc.Add("JWT: GenerateUserJWT()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	accessToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 15, time.Minute, "SECIRE_AUTH_SECRET")
 
 	if err != nil {
 		crc.Add("JWT: GenerateUserJWT()", nil, http.StatusInternalServerError, err)
@@ -88,17 +106,67 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 		domain = ".hallowedvisions.com"
 	}
 
+	refreshMaxAge := int(refreshToken.Exp - time.Now().Unix())
+
 	ginCtx.SetCookie(
-		"__Secure-secure-auth.access",
-		jwtToken,
-		60*1000*60,
+		"__Secure-secure-auth.refresh",
+		refreshToken.Token,
+		refreshMaxAge,
 		"/",
 		domain,
 		true,
 		true,
 	)
 
-	ginCtx.JSON(200, gin.H{"message": "User Logged In"})
+	ginCtx.JSON(200, ReauthResponse{
+		UserID:      user.ID,
+		Email:       user.Email,
+		ExpiresAt:   accessToken.Exp,
+		IssuedAt:    accessToken.Iat,
+		Token:       accessToken.Token,
+		CallResults: crc.CallResults,
+	})
+}
+
+func RefreshAuthTokenHandler(ginCtx *gin.Context) {
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err, nil)
+		return
+	}
+
+	var SECURE_REFRESH_SECRET = []byte(os.Getenv("SECURE_REFRESH_SECRET"))
+	cookie, err := ginCtx.Request.Cookie("__Secure-secure-auth.refresh")
+
+	if err != nil {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		fmt.Println("Auth Cookie Is Missing")
+		return
+	}
+
+	user, err := middleware.GetUserDetail(ginCtx, cookie.Value, SECURE_REFRESH_SECRET)
+
+	if err != nil {
+		return
+	}
+
+	accessToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 15, time.Minute, "SECURE_AUTH_SECRET")
+
+	if err != nil {
+		crc.Add("JWT: GenerateUserJWT()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	ginCtx.JSON(200, ReauthResponse{
+		UserID:      user.ID,
+		Email:       user.Email,
+		ExpiresAt:   accessToken.Exp,
+		IssuedAt:    accessToken.Iat,
+		Token:       accessToken.Token,
+		CallResults: crc.CallResults,
+	})
 }
 
 type CreateUserRequestBody struct {
@@ -206,7 +274,7 @@ func LogoutUserHandler(ginCtx *gin.Context) {
 	}
 
 	ginCtx.SetCookie(
-		"__Secure-secure-auth.access",
+		"__Secure-secure-auth.refresh",
 		"",
 		-1,
 		"/",

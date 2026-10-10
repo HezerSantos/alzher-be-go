@@ -10,4 +10,5 @@ func ConnectAuthRouter(r *gin.RouterGroup) {
 	auth.POST("/login", middleware.RateLimit(5, 10), GetAuthTokenHandler)
 	auth.POST("/signup", middleware.RateLimit(5, 10), CreateUserHandler)
 	auth.POST("/logout", middleware.RateLimit(5, 10), LogoutUserHandler)
+	auth.POST("/refresh", middleware.RateLimit(5, 10), RefreshAuthTokenHandler)
 }
