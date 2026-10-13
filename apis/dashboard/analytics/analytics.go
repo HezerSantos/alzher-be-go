@@ -483,6 +483,10 @@ func GetAnalyticsHandler(ginCtx *gin.Context) {
 		monthlyBarChartData[i-1] = data
 	}
 
+	monthlyBarChartData = slices.DeleteFunc(monthlyBarChartData, func(d ChartData) bool {
+		return d == nil
+	})
+
 	scatterData := make([]DailySums, len(dailySums))
 
 	for i, d := range dailySums {
