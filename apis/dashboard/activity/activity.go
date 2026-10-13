@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+)
+
+var dateRegex = regexp.MustCompile(
+	`^(?:[1-9]|1[0-2])/(?:[1-9]|[12][0-9]|3[01])/[0-9]{4}$`,
 )
 
 type RequestParams struct {
@@ -313,10 +318,10 @@ func DeleteActivityByIDHandler(ginCtx *gin.Context) {
 }
 
 type PutRequestBody struct {
-	Category        string  `json:"category" binding:"omitempty,oneof=Dining Merchandise Entertainment Grocery Transportation Subscriptions Bills"`
-	Description     string  `json:"description"`
-	Amount          float64 `json:"amount"`
-	TransactionDate string  `json:"transactionDate" binding:"dateformat"`
+	Category        *string  `json:"category"`
+	Description     *string  `json:"description"`
+	Amount          *float64 `json:"amount"`
+	TransactionDate *string  `json:"transactionDate"`
 }
 
 type PutRequestUri struct {
@@ -332,6 +337,35 @@ func updateTransactionByID(transaction *models.Transaction, updates map[string]i
 
 	return &result.RowsAffected, nil
 }
+
+func bindPatchRequestParams(requestBody PutRequestBody) *map[string]string {
+
+	errors := map[string]string{}
+	if requestBody.Category != nil {
+		if _, ok := constants.CATEGORIES[*requestBody.Category]; !ok {
+			errors["category"] = "Category Is Not Valid"
+		}
+	}
+
+	if requestBody.Description != nil && *requestBody.Description == "" {
+		errors["description"] = "Description Is Not Valid"
+	}
+
+	if requestBody.Amount != nil && *requestBody.Amount <= 0 {
+		errors["amount"] = "Amount Is Not Valid"
+	}
+
+	if requestBody.TransactionDate != nil && !dateRegex.MatchString(*requestBody.TransactionDate) {
+		errors["date"] = "Date Is Not Valid"
+	}
+
+	if len(errors) != 0 {
+		return &errors
+	} else {
+		return nil
+	}
+}
+
 func PatchActivityByIDHandler(ginCtx *gin.Context) {
 
 	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
@@ -364,6 +398,14 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
+	errorMap := bindPatchRequestParams(requestBody)
+
+	if errorMap != nil {
+		ginCtx.JSON(http.StatusBadRequest, gin.H{
+			"validationErrors": errorMap,
+		})
+		return
+	}
 	parsedTransactionId, err := uuid.Parse(requestUri.TransactionID)
 
 	if err != nil {
@@ -404,17 +446,17 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 
 	updatedTransactionMap := map[string]interface{}{}
 
-	if requestBody.Category != "" && requestBody.Category != transaction.Category {
+	if requestBody.Category != nil && *requestBody.Category != transaction.Category {
 		updatedTransactionMap["category"] = requestBody.Category
 	}
-	if requestBody.Description != "" {
+	if requestBody.Description != nil && *requestBody.Description != transaction.Description {
 		updatedTransactionMap["description"] = requestBody.Description
 	}
-	if requestBody.Amount != 0 {
+	if requestBody.Amount != nil && *requestBody.Amount != transaction.Amount {
 		updatedTransactionMap["amount"] = requestBody.Amount
 	}
-	if requestBody.TransactionDate != "" {
-		splitTransactionDate := strings.Split(requestBody.TransactionDate, "/")
+	if requestBody.TransactionDate != nil {
+		splitTransactionDate := strings.Split(*requestBody.TransactionDate, "/")
 
 		newMonth := splitTransactionDate[0]
 		newDay := splitTransactionDate[1]
@@ -424,8 +466,12 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 		numMonth, _ := strconv.Atoi(newMonth)
 		numYear, _ := strconv.Atoi(newYear)
 
-		updatedTransactionMap["day"] = numDay
-		updatedTransactionMap["year"] = numYear
+		if numDay != transaction.Day {
+			updatedTransactionMap["day"] = numDay
+		}
+		if numYear != transaction.Year {
+			updatedTransactionMap["year"] = numYear
+		}
 
 		var stringMonth string
 
@@ -436,7 +482,10 @@ func PatchActivityByIDHandler(ginCtx *gin.Context) {
 			}
 		}
 
-		updatedTransactionMap["month"] = stringMonth
+		if stringMonth != transaction.Month {
+			updatedTransactionMap["month"] = stringMonth
+		}
+
 	}
 
 	if len(updatedTransactionMap) == 0 {
