@@ -92,7 +92,7 @@ func GetAuthTokenHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	accessToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 15, time.Minute, "SECIRE_AUTH_SECRET")
+	accessToken, err := jwt.GenerateUserJWT(user.ID, user.Email, 15, time.Minute, "SECURE_AUTH_SECRET")
 
 	if err != nil {
 		crc.Add("JWT: GenerateUserJWT()", nil, http.StatusInternalServerError, err)
