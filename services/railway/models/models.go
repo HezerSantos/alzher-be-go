@@ -33,6 +33,32 @@ type Transaction struct {
 	StatementID string    `json:"statementId" gorm:"column:statementHash"`
 }
 
+type Budget struct {
+	ID             uuid.UUID       `json:"id" gorm:"type:uuid;primaryKey"`
+	Name           string          `json:"name" gorm:"not null"`
+	UserID         uuid.UUID       `json:"userId" gorm:"type:uuid;not null"`
+	User           User            `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	GrossIncome    float64         `json:"grossIncome" gorm:"not null"`
+	BudgetSections []BudgetSection `json:"budgetSections" gorm:"foreignKey:BudgetID"`
+}
+
+type BudgetSection struct {
+	ID                 uuid.UUID            `json:"id" gorm:"type:uuid;primaryKey"`
+	Name               string               `json:"name" gorm:"not null"`
+	BudgetID           uuid.UUID            `json:"budgetId" gorm:"type:uuid;not null;uniqueIndex:idx_one_deduction_per_budget,where:is_deductions = true"`
+	Budget             Budget               `json:"-" gorm:"foreignKey:BudgetID"`
+	IsDeductions       bool                 `json:"isDeductions" gorm:"not null;default:false"`
+	BudgetSectionItems []BudgetSectionItems `json:"budgetSectionItems" gorm:"foreignKey:BudgetSectionID"`
+}
+
+type BudgetSectionItems struct {
+	ID              uuid.UUID     `json:"id" gorm:"type:uuid;primaryKey"`
+	BudgetSectionID uuid.UUID     `json:"budgetSectionId" gorm:"type:uuid;not null"`
+	BudgetSection   BudgetSection `json:"-" gorm:"foreignKey:BudgetSectionID"`
+	CategoryName    string        `json:"categoryName" gorm:"not null"`
+	Amount          float64       `json:"amount" gorm:"not null"`
+}
+
 func (User) TableName() string {
 	return "User"
 }
@@ -43,4 +69,16 @@ func (Transaction) TableName() string {
 
 func (Statements) TableName() string {
 	return "Statements"
+}
+
+func (Budget) TableName() string {
+	return "Budget"
+}
+
+func (BudgetSection) TableName() string {
+	return "BudgetSection"
+}
+
+func (BudgetSectionItems) TableName() string {
+	return "BudgetSectionItems"
 }
