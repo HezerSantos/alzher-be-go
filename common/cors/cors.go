@@ -9,6 +9,7 @@ import (
 var CorsHandler = cors.New(cors.Options{
 	AllowedOrigins: []string{
 		"http://localhost:5173",
+		"https://alzher.hallowedvisions.com",
 	},
 	AllowedMethods: []string{
 		http.MethodGet,
