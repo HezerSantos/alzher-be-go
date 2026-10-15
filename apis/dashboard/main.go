@@ -3,6 +3,7 @@ package dashboard
 import (
 	"github.com/HezerSantos/alzher-api/apis/dashboard/activity"
 	"github.com/HezerSantos/alzher-api/apis/dashboard/analytics"
+	"github.com/HezerSantos/alzher-api/apis/dashboard/budget"
 	"github.com/HezerSantos/alzher-api/apis/dashboard/overview"
 	"github.com/HezerSantos/alzher-api/apis/dashboard/scan"
 	"github.com/HezerSantos/alzher-api/apis/dashboard/settings"
@@ -17,4 +18,5 @@ func ConnectDashboardRouter(r *gin.RouterGroup) {
 	activity.ConnectActivityRouter(dashboard)
 	settings.ConnectSettingsRouter(dashboard)
 	scan.ConnectScanRouter(dashboard)
+	budget.ConnectBudgetRouter(dashboard)
 }

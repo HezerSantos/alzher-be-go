@@ -4,6 +4,6 @@ func All() []interface{} {
 	return []interface{}{
 		&Budget{},
 		&BudgetSection{},
-		&BudgetSectionItems{},
+		&BudgetSectionItem{},
 	}
 }

@@ -40,18 +40,19 @@ type Budget struct {
 	User           User            `json:"user,omitempty" gorm:"foreignKey:UserID"`
 	GrossIncome    float64         `json:"grossIncome" gorm:"not null"`
 	BudgetSections []BudgetSection `json:"budgetSections" gorm:"foreignKey:BudgetID"`
+	IsActive       bool            `json:"isActive" gorm:"not null"`
 }
 
 type BudgetSection struct {
-	ID                 uuid.UUID            `json:"id" gorm:"type:uuid;primaryKey"`
-	Name               string               `json:"name" gorm:"not null"`
-	BudgetID           uuid.UUID            `json:"budgetId" gorm:"type:uuid;not null;uniqueIndex:idx_one_deduction_per_budget,where:is_deductions = true"`
-	Budget             Budget               `json:"-" gorm:"foreignKey:BudgetID"`
-	IsDeductions       bool                 `json:"isDeductions" gorm:"not null;default:false"`
-	BudgetSectionItems []BudgetSectionItems `json:"budgetSectionItems" gorm:"foreignKey:BudgetSectionID"`
+	ID                 uuid.UUID           `json:"id" gorm:"type:uuid;primaryKey"`
+	Name               string              `json:"name" gorm:"not null"`
+	BudgetID           uuid.UUID           `json:"budgetId" gorm:"type:uuid;not null;uniqueIndex:idx_one_deduction_per_budget,where:is_deductions = true"`
+	Budget             Budget              `json:"-" gorm:"foreignKey:BudgetID"`
+	IsDeductions       bool                `json:"isDeductions" gorm:"not null;default:false"`
+	BudgetSectionItems []BudgetSectionItem `json:"budgetSectionItems" gorm:"foreignKey:BudgetSectionID"`
 }
 
-type BudgetSectionItems struct {
+type BudgetSectionItem struct {
 	ID              uuid.UUID     `json:"id" gorm:"type:uuid;primaryKey"`
 	BudgetSectionID uuid.UUID     `json:"budgetSectionId" gorm:"type:uuid;not null"`
 	BudgetSection   BudgetSection `json:"-" gorm:"foreignKey:BudgetSectionID"`
@@ -79,6 +80,6 @@ func (BudgetSection) TableName() string {
 	return "BudgetSection"
 }
 
-func (BudgetSectionItems) TableName() string {
-	return "BudgetSectionItems"
+func (BudgetSectionItem) TableName() string {
+	return "BudgetSectionItem"
 }
