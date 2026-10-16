@@ -174,7 +174,7 @@ func getActiveBudgetByQuery(userId uuid.UUID) (*models.Budget, error) {
 	return &budget, nil
 }
 
-func updateBudgetIsActiveByID(budgetId uuid.UUID, status bool) (int64, error) {
+func updateBudgetIsActiveByIDMutation(budgetId uuid.UUID, status bool) (int64, error) {
 	result := railway.DB.Model(&models.Budget{}).
 		Where("id = ?", budgetId).
 		Update("is_active", status)
@@ -182,7 +182,34 @@ func updateBudgetIsActiveByID(budgetId uuid.UUID, status bool) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
-func ActivateBudgetSection(ginCtx *gin.Context) {
+func updateBudgetIsActiveByIDAtomicMutation(willBeActive *models.Budget, willBeInactive *models.Budget) error {
+	err := railway.DB.Model(&models.Budget{}).Transaction(func(tx *gorm.DB) error {
+		if willBeInactive != nil {
+			if err := tx.Model(&models.Budget{}).
+				Where("id = ?", willBeInactive.ID).
+				Update("is_active", false).Error; err != nil {
+				return err
+			}
+		}
+
+		// Second update
+		if err := tx.Model(&models.Budget{}).
+			Where("id = ?", willBeActive.ID).
+			Update("is_active", true).Error; err != nil {
+			return err // Automatically rolls back the first update
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ActivateBudgetSectionHandler(ginCtx *gin.Context) {
 	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
 
 	if err != nil {
@@ -220,6 +247,8 @@ func ActivateBudgetSection(ginCtx *gin.Context) {
 		return
 	}
 
+	crc.Add("getBudgetByIDQuery()", *budget, http.StatusOK, nil)
+
 	if budget.UserID != user.ID {
 		ginCtx.JSON(http.StatusForbidden, gin.H{
 			"error": "Forbidden",
@@ -235,33 +264,193 @@ func ActivateBudgetSection(ginCtx *gin.Context) {
 		return
 	}
 
-	if !errors.Is(aberr, gorm.ErrRecordNotFound) {
-		crc.Add("getActiveBudgetByQuery()", &activeBudget, http.StatusOK, nil)
-
-		rowsAffected, err := updateBudgetIsActiveByID(activeBudget.ID, false)
-
-		if err != nil {
-			crc.Add("updateBudgetIsActiveByID()", nil, http.StatusInternalServerError, err)
-			errorfuncs.NetworkError(ginCtx, nil, crc)
-			return
-		}
-		crc.Add("updateBudgetIsActiveByID()", gin.H{"rowsAffected": rowsAffected}, http.StatusOK, nil)
-	}
-
-	rowsAffected, err := updateBudgetIsActiveByID(budget.ID, true)
+	err = updateBudgetIsActiveByIDAtomicMutation(budget, activeBudget)
 
 	if err != nil {
-		crc.Add("updateBudgetIsActiveByID()", nil, http.StatusInternalServerError, err)
+		crc.Add("updateBudgetIsActiveByIDAtomicMutation()", nil, http.StatusInternalServerError, err)
 		errorfuncs.NetworkError(ginCtx, nil, crc)
 		return
 	}
 
-	crc.Add("updateBudgetIsActiveByID()", gin.H{"rowsAffected": rowsAffected}, http.StatusOK, nil)
+	budget.IsActive = true
+	if activeBudget != nil {
+		activeBudget.IsActive = false
+	}
 
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"activeBudget":   budget,
 		"inactiveBudget": activeBudget,
 		"callResults":    crc.CallResults,
+	})
+
+}
+
+type BudgetByIDURIRequest struct {
+	ID uuid.UUID `uri:"id" binding:"required"`
+}
+
+func GetBudgetByIDHandler(ginCtx *gin.Context) {
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err, nil)
+		return
+	}
+
+	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
+	if err != nil {
+		errorfuncs.UnauthorizedError(ginCtx)
+		return
+	}
+
+	var requestUri BudgetByIDURIRequest
+
+	if err := ginCtx.ShouldBindUri(&requestUri); err != nil {
+		crc.Add("ShouldBindUri()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
+		return
+	}
+
+	budget, err := getBudgetByIDQuery(requestUri.ID)
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		crc.Add("getBudgetByIDQuery()", nil, http.StatusNotFound, err)
+		ginCtx.JSON(http.StatusNotFound, gin.H{
+			"error":       "Budget Not Found",
+			"callResults": crc.CallResults,
+		})
+		return
+	}
+	if err != nil {
+		crc.Add("getBudgetByIDQuery()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	crc.Add("getBudgetByIDQuery()", *budget, http.StatusOK, nil)
+
+	if budget.UserID != user.ID {
+		ginCtx.JSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden",
+		})
+		return
+	}
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"budget": budget,
+	})
+
+}
+
+func deleteBudgetByIDMutation(budgetId uuid.UUID) error {
+	err := railway.DB.Delete(&models.Budget{}, budgetId).Error
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func DeleteBudgetByIDHandler(ginCtx *gin.Context) {
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err, nil)
+		return
+	}
+
+	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
+	if err != nil {
+		errorfuncs.UnauthorizedError(ginCtx)
+		return
+	}
+
+	var requestUri BudgetByIDURIRequest
+
+	if err := ginCtx.ShouldBindUri(&requestUri); err != nil {
+		crc.Add("ShouldBindUri()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
+		return
+	}
+
+	budget, err := getBudgetByIDQuery(requestUri.ID)
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		crc.Add("getBudgetByIDQuery()", nil, http.StatusNotFound, err)
+		ginCtx.JSON(http.StatusNotFound, gin.H{
+			"error":       "Budget Not Found",
+			"callResults": crc.CallResults,
+		})
+		return
+	}
+	if err != nil {
+		crc.Add("getBudgetByIDQuery()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	crc.Add("getBudgetByIDQuery()", *budget, http.StatusOK, nil)
+
+	if budget.UserID != user.ID {
+		ginCtx.JSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden",
+		})
+		return
+	}
+
+	err = deleteBudgetByIDMutation(budget.ID)
+
+	if err != nil {
+		crc.Add("deleteBudgetByIDMutation()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"deletedBudget": budget,
+	})
+
+}
+
+func getAllBudgetsQuery(userId uuid.UUID) ([]models.Budget, error) {
+	var budgets []models.Budget
+
+	err := railway.DB.Preload("BudgetSections.BudgetSectionItems").Where(`"user_id" = ?`, userId).Find(&budgets).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return budgets, nil
+}
+
+func GetAllBudgetsHandler(ginCtx *gin.Context) {
+	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
+
+	if err != nil {
+		errorfuncs.NetworkError(ginCtx, err, nil)
+		return
+	}
+
+	user, err := userinfo.GetUserContext(ginCtx.Request.Context())
+	if err != nil {
+		errorfuncs.UnauthorizedError(ginCtx)
+		return
+	}
+
+	budgets, err := getAllBudgetsQuery(user.ID)
+
+	if err != nil {
+		crc.Add("getAllBudgetsQuery()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	crc.Add("getAllBudgetsQuery()", budgets, http.StatusOK, nil)
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"budgets": budgets,
 	})
 
 }
