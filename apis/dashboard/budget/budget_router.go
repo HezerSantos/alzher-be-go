@@ -13,4 +13,5 @@ func ConnectBudgetRouter(r *gin.RouterGroup) {
 	budget.POST("", middleware.RateLimit(5, 10), CreateBudgetHandler)
 	budget.POST("/:id/activate", middleware.RateLimit(5, 10), ActivateBudgetSectionHandler)
 	budget.DELETE("/:id", middleware.RateLimit(5, 10), DeleteBudgetByIDHandler)
+	budget.PATCH("/:id", middleware.RateLimit(5, 10), UpdateBudgetHandler)
 }

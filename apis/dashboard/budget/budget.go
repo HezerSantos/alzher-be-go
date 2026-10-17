@@ -147,7 +147,7 @@ func CreateBudgetHandler(ginCtx *gin.Context) {
 }
 
 type ActivateBudgetSectionURI struct {
-	ID uuid.UUID `uri:"id" binding:"required"`
+	ID string `uri:"id" binding:"required"`
 }
 
 func getBudgetByIDQuery(budgetId uuid.UUID) (*models.Budget, error) {
@@ -231,7 +231,15 @@ func ActivateBudgetSectionHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	budget, err := getBudgetByIDQuery(requestUri.ID)
+	requestUriUUID, err := uuid.Parse(requestUri.ID)
+
+	if err != nil {
+		crc.Add("uuid.Parse()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
+		return
+	}
+
+	budget, err := getBudgetByIDQuery(requestUriUUID)
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		crc.Add("getBudgetByIDQuery()", nil, http.StatusNotFound, err)
@@ -256,7 +264,7 @@ func ActivateBudgetSectionHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	activeBudget, aberr := getActiveBudgetByQuery(requestUri.ID)
+	activeBudget, aberr := getActiveBudgetByQuery(user.ID)
 
 	if aberr != nil && !errors.Is(aberr, gorm.ErrRecordNotFound) {
 		crc.Add("getActiveBudgetByQuery()", nil, http.StatusInternalServerError, aberr)
@@ -286,7 +294,7 @@ func ActivateBudgetSectionHandler(ginCtx *gin.Context) {
 }
 
 type BudgetByIDURIRequest struct {
-	ID uuid.UUID `uri:"id" binding:"required"`
+	ID string `uri:"id" binding:"required"`
 }
 
 func GetBudgetByIDHandler(ginCtx *gin.Context) {
@@ -311,7 +319,14 @@ func GetBudgetByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	budget, err := getBudgetByIDQuery(requestUri.ID)
+	requestUriUUID, err := uuid.Parse(requestUri.ID)
+
+	if err != nil {
+		crc.Add("uuid.Parse()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
+		return
+	}
+	budget, err := getBudgetByIDQuery(requestUriUUID)
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		crc.Add("getBudgetByIDQuery()", nil, http.StatusNotFound, err)
@@ -343,14 +358,34 @@ func GetBudgetByIDHandler(ginCtx *gin.Context) {
 
 }
 
-func deleteBudgetByIDMutation(budgetId uuid.UUID) error {
-	err := railway.DB.Delete(&models.Budget{}, budgetId).Error
+func deleteBudgetByBudgetMutation(budget models.Budget) error {
+	return railway.DB.Transaction(func(tx *gorm.DB) error {
+		// 1. Delete all items belonging to the budget's sections.
+		if err := tx.
+			Where("budget_section_id IN (?)",
+				tx.Model(&models.BudgetSection{}).
+					Select("id").
+					Where("budget_id = ?", budget.ID),
+			).
+			Delete(&models.BudgetSectionItem{}).Error; err != nil {
+			return err
+		}
 
-	if err != nil {
-		return err
-	}
+		// 2. Delete the budget's sections.
+		if err := tx.
+			Where("budget_id = ?", budget.ID).
+			Delete(&models.BudgetSection{}).Error; err != nil {
+			return err
+		}
 
-	return nil
+		// 3. Delete the budget.
+		if err := tx.
+			Delete(&models.Budget{}, "id = ?", budget.ID).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 func DeleteBudgetByIDHandler(ginCtx *gin.Context) {
@@ -375,7 +410,15 @@ func DeleteBudgetByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	budget, err := getBudgetByIDQuery(requestUri.ID)
+	requestUriUUID, err := uuid.Parse(requestUri.ID)
+
+	if err != nil {
+		crc.Add("uuid.Parse()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
+		return
+	}
+
+	budget, err := getBudgetByIDQuery(requestUriUUID)
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		crc.Add("getBudgetByIDQuery()", nil, http.StatusNotFound, err)
@@ -400,7 +443,7 @@ func DeleteBudgetByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	err = deleteBudgetByIDMutation(budget.ID)
+	err = deleteBudgetByBudgetMutation(*budget)
 
 	if err != nil {
 		crc.Add("deleteBudgetByIDMutation()", nil, http.StatusInternalServerError, err)
@@ -485,6 +528,14 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 		return
 	}
 
+	requestUriUUID, err := uuid.Parse(requestUri.ID)
+
+	if err != nil {
+		crc.Add("uuid.Parse()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
+		return
+	}
+
 	var requestBody UpdateBudgetRequestBody
 
 	if err := ginCtx.ShouldBindBodyWithJSON(&requestBody); err != nil {
@@ -493,13 +544,21 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	if requestUri.ID != requestBody.Budget.ID {
+	requestBodyUUID, err := uuid.Parse(requestUri.ID)
+
+	if err != nil {
+		crc.Add("uuid.Parse()", nil, http.StatusBadRequest, err)
+		errorfuncs.BadRequestError(ginCtx, crc)
+		return
+	}
+
+	if requestUriUUID != requestBodyUUID {
 		crc.Add("MatchError()", nil, http.StatusBadRequest, fmt.Errorf("Budget IDs Do Not Match"))
 		errorfuncs.BadRequestError(ginCtx, crc)
 		return
 	}
 
-	currentBudget, err := getBudgetByIDQuery(requestUri.ID)
+	currentBudget, err := getBudgetByIDQuery(requestUriUUID)
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		crc.Add("getBudgetByIDQuery()", nil, http.StatusNotFound, err)
@@ -525,11 +584,11 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 	}
 
 	type CurrentBudgetInfo struct {
-		CurrentBudgetSections map[uuid.UUID]models.BudgetSection
-		RequestBudgetSections map[uuid.UUID]models.BudgetSection
-		NewBudgetSections     map[uuid.UUID]models.BudgetSection
-		DeletedBudgetSections map[uuid.UUID]models.BudgetSection
-		UpdateBudgetSections  map[uuid.UUID]models.BudgetSection
+		CurrentBudgetSections map[uuid.UUID]models.BudgetSection //Sections sent from database
+		RequestBudgetSections map[uuid.UUID]models.BudgetSection // Sections sent in the request
+		NewBudgetSections     map[uuid.UUID]models.BudgetSection //Sections that are not in the Current
+		DeletedBudgetSections map[uuid.UUID]models.BudgetSection //Sections that are in current but not in the request
+		UpdateBudgetSections  map[uuid.UUID]models.BudgetSection //Sections in the current that have potential changes
 	}
 
 	budgetInfo := CurrentBudgetInfo{
@@ -540,9 +599,14 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 		UpdateBudgetSections:  map[uuid.UUID]models.BudgetSection{},
 	}
 
+	var currentDeductionBudgetSectionID uuid.UUID
+
 	//Loop to add the current budget stored in Postgres to the map
 	for _, budgetSection := range currentBudget.BudgetSections {
 		budgetInfo.CurrentBudgetSections[budgetSection.ID] = budgetSection
+		if budgetSection.IsDeductions {
+			currentDeductionBudgetSectionID = budgetSection.ID
+		}
 	}
 
 	//Loop to add the updated budget NOT stored in Postgres to the map
@@ -551,9 +615,16 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 	for _, budgetSection := range requestBody.Budget.BudgetSections {
 		budgetInfo.RequestBudgetSections[budgetSection.ID] = budgetSection
 
-		if budgetInCurrent, ok := budgetInfo.CurrentBudgetSections[budgetSection.ID]; !ok {
+		if budgetInCurrent, ok := budgetInfo.CurrentBudgetSections[budgetSection.ID]; !ok && !budgetSection.IsDeductions {
 			budgetInfo.NewBudgetSections[budgetSection.ID] = budgetSection
 		} else {
+			if budgetInCurrent.ID == currentDeductionBudgetSectionID && !budgetInCurrent.IsDeductions {
+				crc.Add("isDeductionsCheck()", nil, http.StatusBadRequest, fmt.Errorf("Error overwriting current IsDeductions BudgetSection"))
+				ginCtx.JSON(http.StatusBadRequest, gin.H{
+					"callResults": crc.CallResults,
+				})
+				return
+			}
 			budgetInfo.UpdateBudgetSections[budgetInCurrent.ID] = budgetInCurrent
 		}
 	}
@@ -592,7 +663,9 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 
 	}
 
-	updatedBudgetSections := map[uuid.UUID]map[string]interface{}{}
+	updatedBudgetItems := map[uuid.UUID]interface{}{}
+	deletedBudgetItems := map[uuid.UUID]models.BudgetSectionItem{}
+	newBudgetItems := map[uuid.UUID]models.BudgetSectionItem{}
 
 	for budgetSecionID, budgetSection := range budgetInfo.UpdateBudgetSections {
 		staleBudgetSection, _ := budgetInfo.CurrentBudgetSections[budgetSecionID]
@@ -612,6 +685,43 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 			staleBudgetSectionItems[item.ID] = item
 		}
 
+		//deleted and validation check for potential updates
+		for itemId, item := range staleBudgetSectionItems {
+			if incomingItem, ok := incomingBudgetSectionItems[itemId]; !ok {
+				deletedBudgetItems[itemId] = item
+			} else {
+				tempItem := map[string]interface{}{}
+				//It needs to be updated and value checked
+				if item.CategoryName != incomingItem.CategoryName {
+					tempItem["category_name"] = incomingItem.CategoryName
+				}
+				if item.Amount != incomingItem.Amount {
+					tempItem["amount"] = incomingItem.Amount
+				}
+
+				if len(tempItem) != 0 {
+					//item.ID Asserts the item ID of the exisitng item
+					updatedBudgetItems[item.ID] = tempItem
+				}
+			}
+		}
+
+		for itemId, item := range incomingBudgetSectionItems {
+			if _, ok := staleBudgetSectionItems[itemId]; !ok {
+				tempItemCopy := item
+				item.BudgetSectionID = budgetSecionID //Assert the budget id
+				newBudgetItems[itemId] = tempItemCopy
+			}
+		}
 	}
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"newBudgetSections":     budgetInfo.NewBudgetSections,
+		"deletedBudgetSections": budgetInfo.DeletedBudgetSections,
+		"updatedBudgetSections": budgetInfo.UpdateBudgetSections,
+		"newBudgetItems":        newBudgetItems,
+		"deletedBudgetItems":    deletedBudgetItems,
+		"updatedBudgetItemsMap": updatedBudgetItems,
+	})
 
 }
