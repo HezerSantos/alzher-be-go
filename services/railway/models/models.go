@@ -37,9 +37,9 @@ type Budget struct {
 	ID             uuid.UUID       `json:"id" gorm:"type:uuid;primaryKey"`
 	Name           string          `json:"name" gorm:"not null"`
 	UserID         uuid.UUID       `json:"userId" gorm:"type:uuid;not null"`
-	User           User            `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	User           User            `json:"-,omitempty" gorm:"foreignKey:UserID"`
 	GrossIncome    float64         `json:"grossIncome" gorm:"not null"`
-	BudgetSections []BudgetSection `json:"budgetSections" gorm:"foreignKey:BudgetID"`
+	BudgetSections []BudgetSection `json:"budgetSections" gorm:"foreignKey:BudgetID;constraint:OnDelete:CASCADE"`
 	IsActive       bool            `json:"isActive" gorm:"not null"`
 }
 
@@ -49,7 +49,7 @@ type BudgetSection struct {
 	BudgetID           uuid.UUID           `json:"budgetId" gorm:"type:uuid;not null;uniqueIndex:idx_one_deduction_per_budget,where:is_deductions = true"`
 	Budget             Budget              `json:"-" gorm:"foreignKey:BudgetID"`
 	IsDeductions       bool                `json:"isDeductions" gorm:"not null;default:false"`
-	BudgetSectionItems []BudgetSectionItem `json:"budgetSectionItems" gorm:"foreignKey:BudgetSectionID"`
+	BudgetSectionItems []BudgetSectionItem `json:"budgetSectionItems" gorm:"foreignKey:BudgetSectionID;constraint:OnDelete:CASCADE"`
 }
 
 type BudgetSectionItem struct {

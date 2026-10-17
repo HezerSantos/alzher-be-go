@@ -358,34 +358,9 @@ func GetBudgetByIDHandler(ginCtx *gin.Context) {
 
 }
 
-func deleteBudgetByBudgetMutation(budget models.Budget) error {
-	return railway.DB.Transaction(func(tx *gorm.DB) error {
-		// 1. Delete all items belonging to the budget's sections.
-		if err := tx.
-			Where("budget_section_id IN (?)",
-				tx.Model(&models.BudgetSection{}).
-					Select("id").
-					Where("budget_id = ?", budget.ID),
-			).
-			Delete(&models.BudgetSectionItem{}).Error; err != nil {
-			return err
-		}
-
-		// 2. Delete the budget's sections.
-		if err := tx.
-			Where("budget_id = ?", budget.ID).
-			Delete(&models.BudgetSection{}).Error; err != nil {
-			return err
-		}
-
-		// 3. Delete the budget.
-		if err := tx.
-			Delete(&models.Budget{}, "id = ?", budget.ID).Error; err != nil {
-			return err
-		}
-
-		return nil
-	})
+func deleteBudgetByIDMutation(budgetID uuid.UUID) error {
+	err := railway.DB.Delete(&models.Budget{}, budgetID).Error
+	return err
 }
 
 func DeleteBudgetByIDHandler(ginCtx *gin.Context) {
@@ -443,7 +418,7 @@ func DeleteBudgetByIDHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	err = deleteBudgetByBudgetMutation(*budget)
+	err = deleteBudgetByIDMutation(budget.ID)
 
 	if err != nil {
 		crc.Add("deleteBudgetByIDMutation()", nil, http.StatusInternalServerError, err)
@@ -505,6 +480,97 @@ type UpdateBudgetRequestBody struct {
 	Budget models.Budget `json:"budget" binding:"required"`
 }
 
+func updateBudgetSectionByIDMutation(
+	crc *api.CallResultContainer,
+	budgetID uuid.UUID,
+	deletedBudgetSectionIDs []uuid.UUID,
+	deletedBudgetSectionItemIDs []uuid.UUID,
+	newBudgetSections []models.BudgetSection,
+	newBudgetSectionItems map[uuid.UUID]models.BudgetSectionItem,
+	updateBudgetSectionItemsMap map[uuid.UUID]interface{},
+	updateBudgetInfoMap map[string]interface{},
+	updateBudgetSectionMap map[uuid.UUID]map[string]interface{},
+) error {
+	err := railway.DB.Transaction(func(tx *gorm.DB) error {
+
+		//Delete the budget Sections
+		if len(deletedBudgetSectionIDs) != 0 {
+			if err := tx.Where("id IN ?", deletedBudgetSectionIDs).Delete(&models.BudgetSection{}).Error; err != nil {
+				return err
+			}
+			crc.Add("deleteBudgetSectionIDs()", deletedBudgetSectionIDs, http.StatusOK, nil)
+		} else {
+			crc.Add("deleteBudgetSectionIDs()", nil, http.StatusOK, nil)
+		}
+
+		//Delete the budget section items
+		if len(deletedBudgetSectionItemIDs) != 0 {
+			if err := tx.Where("id IN ?", deletedBudgetSectionItemIDs).Delete(&models.BudgetSectionItem{}).Error; err != nil {
+				return err
+			}
+			crc.Add("deletedBudgetSectionItemIDs()", deletedBudgetSectionItemIDs, http.StatusOK, nil)
+		} else {
+			crc.Add("deletedBudgetSectionItemIDs()", nil, http.StatusOK, nil)
+		}
+
+		//Update the Base Budget Info e.g Gross Income, Name
+		if len(updateBudgetInfoMap) != 0 {
+			if err := tx.Model(&models.Budget{}).Where("id = ?", budgetID).Updates(updateBudgetInfoMap).Error; err != nil {
+				return err
+			}
+			crc.Add("updateBudgetInfoMap()", updateBudgetInfoMap, http.StatusOK, nil)
+		} else {
+			crc.Add("updateBudgetInfoMap()", nil, http.StatusOK, nil)
+		}
+
+		//Update the Budget Section Info e.g Name
+		for budgetSectionId, updateMap := range updateBudgetSectionMap {
+			if err := tx.Model(&models.BudgetSection{}).Where("id = ?", budgetSectionId).Updates(updateMap).Error; err != nil {
+				return err
+			}
+		}
+
+		//Update the Budget Section Items
+		for itemId, updateItemMap := range updateBudgetSectionItemsMap {
+			if err := tx.Model(&models.BudgetSectionItem{}).Where("id = ?", itemId).Updates(updateItemMap).Error; err != nil {
+				return err
+			}
+		}
+
+		if len(updateBudgetSectionItemsMap) != 0 {
+			crc.Add("updateBudgetSectionItemsMap()", updateBudgetSectionItemsMap, http.StatusOK, nil)
+		} else {
+			crc.Add("updateBudgetSectionItemsMap()", nil, http.StatusOK, nil)
+		}
+
+		//Insert New Budget Section Items
+		for _, item := range newBudgetSectionItems {
+			if err := tx.Model(&models.BudgetSectionItem{}).Create(&item).Error; err != nil {
+				return err
+			}
+		}
+
+		if len(newBudgetSectionItems) != 0 {
+			crc.Add("newBudgetSectionItems()", newBudgetSectionItems, http.StatusOK, nil)
+		} else {
+			crc.Add("newBudgetSectionItems()", nil, http.StatusOK, nil)
+		}
+
+		if len(newBudgetSections) != 0 {
+			if err := tx.Model(&models.BudgetSection{}).Create(&newBudgetSections).Error; err != nil {
+				return err
+			}
+			crc.Add("newBudgetSections()", newBudgetSections, http.StatusOK, nil)
+		} else {
+			crc.Add("newBudgetSections()", nil, http.StatusOK, nil)
+		}
+
+		return nil
+	})
+
+	return err
+}
+
 func UpdateBudgetHandler(ginCtx *gin.Context) {
 
 	crc, err := api.GetCallResultContainerContext(ginCtx.Request.Context())
@@ -544,15 +610,7 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 		return
 	}
 
-	requestBodyUUID, err := uuid.Parse(requestUri.ID)
-
-	if err != nil {
-		crc.Add("uuid.Parse()", nil, http.StatusBadRequest, err)
-		errorfuncs.BadRequestError(ginCtx, crc)
-		return
-	}
-
-	if requestUriUUID != requestBodyUUID {
+	if requestUriUUID != requestBody.Budget.ID {
 		crc.Add("MatchError()", nil, http.StatusBadRequest, fmt.Errorf("Budget IDs Do Not Match"))
 		errorfuncs.BadRequestError(ginCtx, crc)
 		return
@@ -583,6 +641,15 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 		return
 	}
 
+	updateBudgetInfoMap := map[string]interface{}{}
+
+	if currentBudget.GrossIncome != requestBody.Budget.GrossIncome && requestBody.Budget.GrossIncome != 0 {
+		updateBudgetInfoMap["gross_income"] = requestBody.Budget.GrossIncome
+	}
+	if currentBudget.Name != requestBody.Budget.Name {
+		updateBudgetInfoMap["name"] = requestBody.Budget.Name
+	}
+
 	type CurrentBudgetInfo struct {
 		CurrentBudgetSections map[uuid.UUID]models.BudgetSection //Sections sent from database
 		RequestBudgetSections map[uuid.UUID]models.BudgetSection // Sections sent in the request
@@ -600,7 +667,7 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 	}
 
 	var currentDeductionBudgetSectionID uuid.UUID
-
+	updateBudgetSectionMap := map[uuid.UUID]map[string]interface{}{}
 	//Loop to add the current budget stored in Postgres to the map
 	for _, budgetSection := range currentBudget.BudgetSections {
 		budgetInfo.CurrentBudgetSections[budgetSection.ID] = budgetSection
@@ -615,23 +682,49 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 	for _, budgetSection := range requestBody.Budget.BudgetSections {
 		budgetInfo.RequestBudgetSections[budgetSection.ID] = budgetSection
 
-		if budgetInCurrent, ok := budgetInfo.CurrentBudgetSections[budgetSection.ID]; !ok && !budgetSection.IsDeductions {
+		if budgetInCurrent, ok := budgetInfo.CurrentBudgetSections[budgetSection.ID]; !ok {
+			if budgetSection.IsDeductions {
+				crc.Add("isDeductionsCheck()", nil, http.StatusBadRequest, fmt.Errorf("Duplicate IsDeductions BudgetSection Detected"))
+				ginCtx.JSON(http.StatusBadRequest, gin.H{
+					"callResults": crc.CallResults,
+				})
+				return
+			}
 			budgetInfo.NewBudgetSections[budgetSection.ID] = budgetSection
 		} else {
-			if budgetInCurrent.ID == currentDeductionBudgetSectionID && !budgetInCurrent.IsDeductions {
+			//If the current IsDeductions potential updated budget section IsDeductions is turned false: Error
+			if budgetInCurrent.ID == currentDeductionBudgetSectionID && !budgetSection.IsDeductions {
 				crc.Add("isDeductionsCheck()", nil, http.StatusBadRequest, fmt.Errorf("Error overwriting current IsDeductions BudgetSection"))
 				ginCtx.JSON(http.StatusBadRequest, gin.H{
 					"callResults": crc.CallResults,
 				})
 				return
 			}
-			budgetInfo.UpdateBudgetSections[budgetInCurrent.ID] = budgetInCurrent
+			//If the potential updated budget section IsDeductions is turned true that is not current IsDeductions: Error
+			if budgetInCurrent.ID != currentDeductionBudgetSectionID && budgetSection.IsDeductions {
+				crc.Add("isDeductionsCheck()", nil, http.StatusBadRequest, fmt.Errorf("Error overwriting current IsDeductions BudgetSection"))
+				ginCtx.JSON(http.StatusBadRequest, gin.H{
+					"callResults": crc.CallResults,
+				})
+				return
+			}
+			budgetInfo.UpdateBudgetSections[budgetInCurrent.ID] = budgetSection
+			if budgetInCurrent.Name != budgetSection.Name {
+				updateBudgetSectionMap[budgetInCurrent.ID] = map[string]interface{}{"name": budgetSection.Name}
+			}
 		}
 	}
 
 	//Check to find deleted budget sections that are not deductions
 	for _, budgetSection := range currentBudget.BudgetSections {
-		if _, ok := budgetInfo.RequestBudgetSections[budgetSection.ID]; !ok && !budgetSection.IsDeductions {
+		if _, ok := budgetInfo.RequestBudgetSections[budgetSection.ID]; !ok {
+			if budgetSection.IsDeductions {
+				crc.Add("isDeductionsCheck()", nil, http.StatusBadRequest, fmt.Errorf("Error Deleting IsDeductions BudgetSection"))
+				ginCtx.JSON(http.StatusBadRequest, gin.H{
+					"callResults": crc.CallResults,
+				})
+				return
+			}
 			budgetInfo.DeletedBudgetSections[budgetSection.ID] = budgetSection
 		}
 	}
@@ -648,7 +741,7 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 			errorfuncs.BadRequestError(ginCtx, crc)
 			return
 		}
-		newUUID, err := uuid.NewV7()
+		newBudgetSectionUUID, err := uuid.NewV7()
 
 		if err != nil {
 			crc.Add("uuid.NewV7()", nil, http.StatusInternalServerError, err)
@@ -657,8 +750,22 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 		}
 
 		newBudgetSection := budgetSection
-		newBudgetSection.ID = newUUID
-		newBudgetSection.BudgetID = currentBudget.ID
+		newBudgetSection.ID = newBudgetSectionUUID   //Assert a new Budget Section ID
+		newBudgetSection.BudgetID = currentBudget.ID //Assert the current Budget ID
+
+		for i, item := range newBudgetSection.BudgetSectionItems {
+			newBudgetSectionItemUUID, err := uuid.NewV7()
+
+			if err != nil {
+				crc.Add("uuid.NewV7()", nil, http.StatusInternalServerError, err)
+				errorfuncs.NetworkError(ginCtx, nil, crc)
+				return
+			}
+			newBudgetSectionItem := item
+			newBudgetSectionItem.ID = newBudgetSectionItemUUID
+			newBudgetSectionItem.BudgetSectionID = newBudgetSectionUUID
+			newBudgetSection.BudgetSectionItems[i] = newBudgetSectionItem
+		}
 		newBudgetSections = append(newBudgetSections, newBudgetSection)
 
 	}
@@ -696,6 +803,11 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 					tempItem["category_name"] = incomingItem.CategoryName
 				}
 				if item.Amount != incomingItem.Amount {
+					if incomingItem.Amount == 0 {
+						crc.Add("incomingItem.AmountCheck()()", nil, http.StatusBadRequest, fmt.Errorf("Error Parsing 0 Amount Value"))
+						errorfuncs.BadRequestError(ginCtx, crc)
+						return
+					}
 					tempItem["amount"] = incomingItem.Amount
 				}
 
@@ -708,20 +820,77 @@ func UpdateBudgetHandler(ginCtx *gin.Context) {
 
 		for itemId, item := range incomingBudgetSectionItems {
 			if _, ok := staleBudgetSectionItems[itemId]; !ok {
+				newBudgetSectionItemUUID, err := uuid.NewV7()
+
+				if err != nil {
+					crc.Add("uuid.NewV7()", nil, http.StatusInternalServerError, err)
+					errorfuncs.NetworkError(ginCtx, nil, crc)
+					return
+				}
 				tempItemCopy := item
-				item.BudgetSectionID = budgetSecionID //Assert the budget id
+				tempItemCopy.ID = newBudgetSectionItemUUID
+				tempItemCopy.BudgetSectionID = budgetSecionID //Assert the budget id
 				newBudgetItems[itemId] = tempItemCopy
 			}
 		}
 	}
 
-	ginCtx.JSON(http.StatusOK, gin.H{
-		"newBudgetSections":     budgetInfo.NewBudgetSections,
-		"deletedBudgetSections": budgetInfo.DeletedBudgetSections,
-		"updatedBudgetSections": budgetInfo.UpdateBudgetSections,
-		"newBudgetItems":        newBudgetItems,
-		"deletedBudgetItems":    deletedBudgetItems,
-		"updatedBudgetItemsMap": updatedBudgetItems,
-	})
+	deletedBudgetSectionIDs := make([]uuid.UUID, len(budgetInfo.DeletedBudgetSections))
+	deletedBudgetSectionItemIDs := make([]uuid.UUID, len(deletedBudgetItems))
 
+	for id, _ := range budgetInfo.DeletedBudgetSections {
+		deletedBudgetSectionIDs = append(deletedBudgetSectionIDs, id)
+	}
+	for id, _ := range deletedBudgetItems {
+		deletedBudgetSectionItemIDs = append(deletedBudgetSectionItemIDs, id)
+	}
+
+	if len(deletedBudgetSectionIDs)+
+		len(deletedBudgetSectionItemIDs)+
+		len(newBudgetSections)+
+		len(newBudgetItems)+
+		len(updatedBudgetItems)+
+		len(updateBudgetInfoMap)+
+		len(updateBudgetSectionMap) == 0 {
+		ginCtx.JSON(http.StatusOK, gin.H{
+			"updatedBudget": nil,
+			"staleBudget":   currentBudget,
+			"callResults":   crc.CallResults,
+		})
+		return
+	}
+
+	err = updateBudgetSectionByIDMutation(
+		crc,
+		currentBudget.ID,
+		deletedBudgetSectionIDs,
+		deletedBudgetSectionItemIDs,
+		newBudgetSections,
+		newBudgetItems,
+		updatedBudgetItems,
+		updateBudgetInfoMap,
+		updateBudgetSectionMap,
+	)
+
+	if err != nil {
+		crc.Add("updateBudgetSectionByIDMutation()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	updatedBudget, err := getBudgetByIDQuery(requestUriUUID)
+
+	if err != nil {
+		crc.Add("getBudgetByIDQuery()", nil, http.StatusInternalServerError, err)
+		errorfuncs.NetworkError(ginCtx, nil, crc)
+		return
+	}
+
+	crc.Add("getBudgetByIDQuery()", *updatedBudget, http.StatusOK, nil)
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"updatedBudget": updatedBudget,
+		"staleBudget":   currentBudget,
+		"callResults":   crc.CallResults,
+	})
 }

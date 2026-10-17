@@ -42,13 +42,13 @@ func NetworkError(ginCtx *gin.Context, err error, crc *api.CallResultContainer) 
 }
 
 func UnauthorizedError(ginCtx *gin.Context) {
-	ginCtx.JSON(http.StatusInternalServerError, gin.H{
+	ginCtx.JSON(http.StatusUnauthorized, gin.H{
 		"message": "Unauthorized",
 	})
 }
 
 func BadRequestError(ginCtx *gin.Context, crc *api.CallResultContainer) {
-	ginCtx.JSON(http.StatusInternalServerError, gin.H{
+	ginCtx.JSON(http.StatusBadRequest, gin.H{
 		"message":     "Bad Request",
 		"callResults": crc.CallResults,
 	})
