@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"github.com/HezerSantos/alzher-api/common/api"
 	"github.com/HezerSantos/alzher-api/common/errorfuncs"
@@ -468,6 +469,10 @@ func GetAllBudgetsHandler(ginCtx *gin.Context) {
 	}
 
 	crc.Add("getAllBudgetsQuery()", budgets, http.StatusOK, nil)
+
+	sort.Slice(budgets, func(i, j int) bool {
+		return budgets[i].IsActive && !budgets[j].IsActive
+	})
 
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"budgets":     budgets,
