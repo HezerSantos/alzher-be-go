@@ -37,7 +37,7 @@ type Budget struct {
 	ID             uuid.UUID       `json:"id" gorm:"type:uuid;primaryKey"`
 	Name           string          `json:"name" gorm:"not null"`
 	UserID         uuid.UUID       `json:"userId" gorm:"type:uuid;not null"`
-	User           User            `json:"-,omitempty" gorm:"foreignKey:UserID"`
+	User           User            `json:"-" gorm:"foreignKey:UserID"`
 	GrossIncome    float64         `json:"grossIncome" gorm:"not null"`
 	BudgetSections []BudgetSection `json:"budgetSections" gorm:"foreignKey:BudgetID;constraint:OnDelete:CASCADE"`
 	IsActive       bool            `json:"isActive" gorm:"not null"`
