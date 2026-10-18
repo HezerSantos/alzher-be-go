@@ -16,20 +16,20 @@ import (
 )
 
 type BudgetItems struct {
-	CategoryName string  `json:"categoryName"`
-	Amount       float64 `json:"amount"`
+	CategoryName string  `json:"categoryName"  binding:"required"`
+	Amount       float64 `json:"amount"  binding:"required"`
 }
 
 type BudgetSections struct {
-	SectionName  string        `json:"sectionName"`
-	IsDeductions bool          `json:"isDeductions"`
-	BudgetItems  []BudgetItems `json:"budgetItems"`
+	SectionName  string        `json:"sectionName" binding:"required"`
+	IsDeductions bool          `json:"isDeductions"  binding:"required"`
+	BudgetItems  []BudgetItems `json:"budgetItems"  binding:"required"`
 }
 
 type CreateBudgetRequestBody struct {
-	BudgetName     string           `json:"budgetName"`
-	GrossIncome    float64          `json:"grossIncome"`
-	BudgetSections []BudgetSections `json:"budgetSections"`
+	BudgetName     string           `json:"budgetName" binding:"required"`
+	GrossIncome    float64          `json:"grossIncome"  binding:"required"`
+	BudgetSections []BudgetSections `json:"budgetSections"  binding:"required"`
 }
 
 func createNewBudgetMutation(budget *models.Budget) (*models.Budget, error) {
