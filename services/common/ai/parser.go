@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -82,8 +83,9 @@ var (
 )
 
 func NormalizeStatementText(input string) string {
-	lines := cleanLines(input)
+	fmt.Println(input)
 
+	lines := cleanLines(input)
 	regions := findTransactionRegions(lines)
 
 	var result []string
@@ -92,6 +94,14 @@ func NormalizeStatementText(input string) string {
 	for _, region := range regions {
 		for _, line := range region {
 			result = appendUnique(result, line)
+		}
+	}
+
+	// Preserve transaction rows embedded in lines containing
+	// unrelated text, such as cashback rewards information.
+	for _, line := range lines {
+		for _, transaction := range extractEmbeddedTransactionRows(line) {
+			result = appendUnique(result, transaction)
 		}
 	}
 
@@ -122,6 +132,29 @@ func NormalizeStatementText(input string) string {
 	}
 
 	return strings.Join(result, "\n")
+}
+
+func extractEmbeddedTransactionRows(line string) []string {
+	var transactions []string
+
+	dates := dateRe.FindAllStringIndex(line, -1)
+
+	for i, date := range dates {
+		// A transaction may begin after unrelated text on the same line.
+		candidate := strings.TrimSpace(line[date[0]:])
+
+		// Evaluate each date-delimited segment separately.
+		if i+1 < len(dates) {
+			candidate = strings.TrimSpace(line[date[0]:dates[i+1][0]])
+		}
+
+		if transactionRowRe.MatchString(candidate) ||
+			transactionRowWithTwoDatesRe.MatchString(candidate) {
+			transactions = appendUnique(transactions, candidate)
+		}
+	}
+
+	return transactions
 }
 
 func cleanLines(input string) []string {
