@@ -37,27 +37,35 @@ Each transaction must contain postDate, description, and amount. If no qualifyin
 
 7. **Avoid unsupported assumptions.** Do not invent transactions, dates, descriptions, or amounts. Do not omit a plausible purchase merely because the merchant is unfamiliar or the statement's format is unusual.
 
-## Mandatory verification
+## Required extraction procedure
 
-Before producing the result, complete these checks:
+Follow these steps in order before returning the JSON.
 
-1. **Inspect the entire input.** Identify potential transaction entries throughout the statement, including later sections and any additional pages represented in the text.
+1. **Enumerate candidates.** Scan the entire statement from beginning to end. Identify each dated entry that may represent a transaction. Do not begin composing the final JSON while scanning.
 
-2. **Classify each entry.** Determine whether each candidate is an individual purchase or excluded account activity. Pay particular attention to dated entries containing merchant descriptions and amounts.
+2. **Classify candidates.** For each candidate, determine whether it is a qualifying purchase. Exclude payments, refunds, rewards, fees, interest, and other non-purchase activity. A purchase may be identified by its merchant, date, amount, and surrounding transaction-table context.
 
-3. **Check completeness.** Ensure every qualifying purchase is included exactly once. Re-examine entries that could have been overlooked because of unusual formatting, wrapped descriptions, or nearby payments, rewards, and statement information.
+3. **Build the transaction list.** Record every qualifying purchase with its posted date, description, and amount. Preserve separate purchases as separate entries, even when the merchant and amount repeat.
 
-4. **Verify transaction fields.** Check each posted date, merchant description, and amount against the source text. Remove duplicates and incorrectly included non-purchase entries.
+4. **Audit against the source.** Scan the entire statement a second time, comparing each candidate purchase against the extracted list. Add omitted purchases and remove duplicates. Pay particular attention to entries near page breaks, wrapped descriptions, payment sections, and the end of transaction tables.
 
-5. **Reconcile totals when possible.** Sum the extracted purchase amounts and compare them with any corresponding purchase total reported by the statement. Account for differences in reporting periods or transaction categories. If totals disagree, re-examine the statement for omissions, duplicates, and classification errors. Never invent transactions or alter amounts to force a match.
+5. **Verify arithmetic.** Calculate the sum of the extracted purchase amounts. Compare it with a statement total only when that total represents the same purchase category and reporting period. If the totals disagree, repeat the candidate scan and check for omissions, duplicates, and incorrect amounts. Do not invent transactions or change amounts to force a match.
+
+6. **Verify output.** Confirm every extracted entry has a valid posted date, description, and positive numeric amount. Confirm the JSON is valid and contains each qualifying purchase exactly once.
+
+Do not output intermediate candidates, calculations, or verification notes. Return only the required JSON.
 
 ## Critical empty-result rule
 
-Return {"transactions":[]} **only after verifying that the entire statement contains no qualifying purchases**. Never return an empty array merely because the statement is unfamiliar, the formatting is inconsistent, or the input contains distracting account information.
+Return {"transactions":[]} only after verifying that the entire statement contains no qualifying purchases. Never return an empty array merely because the statement is unfamiliar, the formatting is inconsistent, or the input contains distracting account information.
 
 If a potential transaction has a date, merchant-like description, and amount, explicitly evaluate it before excluding it. Do not confuse payment or reward information with a purchase, but do not let nearby non-purchase activity cause a valid purchase to be omitted.
 
-Apply all rules consistently across issuers, merchants, statement formats, and billing periods. Return the complete JSON result only.
+## Consistency requirements
+
+Apply all rules consistently across issuers, merchants, statement formats, and billing periods. Do not stop early, skip sections, or assume that an unfamiliar layout contains no additional transactions.
+
+Return the complete JSON result only.
 `
 
 func ReturnFinancialPromptInstructions(text string) string {
