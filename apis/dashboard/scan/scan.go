@@ -119,7 +119,9 @@ func processFile(ctx context.Context, cancel context.CancelFunc, crc *api.CallRe
 	}
 
 	normalized := ai.NormalizeStatementText(textBuilder.String())
-	// fmt.Println(normalized)
+	fmt.Println("NORMALIZED START:")
+	fmt.Println(normalized)
+	fmt.Println("NORMALIZED END:")
 	// return nil, nil, nil
 	transactions, err := groq.AskGroq(ctx, crc, normalized)
 
