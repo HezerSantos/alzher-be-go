@@ -33,13 +33,13 @@ func AskGroq(ctx context.Context, crc *api.CallResultContainer, input string) ([
 		option.WithBaseURL(GROQ_URL),
 	)
 
-	prompt := ai.ReturnFinancialPromptInstructions(input)
 	resp, err := client.Chat.Completions.New(
 		ctx,
 		openai.ChatCompletionNewParams{
 			Model: GB.ReturnModel(),
 			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.UserMessage(prompt),
+				openai.SystemMessage(ai.SystemPrompt),
+				openai.UserMessage(input),
 			},
 			Temperature: openai.Float(0.0),
 			MaxTokens:   openai.Int(8192),
