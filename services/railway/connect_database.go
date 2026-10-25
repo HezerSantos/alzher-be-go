@@ -15,6 +15,7 @@ var DB *gorm.DB
 func ConnectDatabase() error {
 	var DATABASE_URL = os.Getenv("DATABASE_URL")
 	var MIGRATE_DATABASE = os.Getenv("MIGRATE_DATABASE")
+	var RESET_DATABASE = os.Getenv("RESET_DATABASE")
 	if DATABASE_URL == "" {
 		return fmt.Errorf("DATA BASE URL NOT CONFIGURED")
 	}
@@ -30,6 +31,12 @@ func ConnectDatabase() error {
 		if err := db.AutoMigrate(models.All()...); err != nil {
 			log.Fatal(err)
 		}
+		log.Println("Database migration completed")
+	}
+
+	if RESET_DATABASE == "true" {
+		log.Println("Resetting Database...")
+		models.Reset(db)
 		log.Println("Database migration completed")
 	}
 
