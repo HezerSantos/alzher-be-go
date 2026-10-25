@@ -167,7 +167,7 @@ func findTransactionRegions(lines []string) [][]string {
 		}
 
 		if i-lastSignal > 4 {
-			if signalCount >= 2 {
+			if signalCount >= 1 {
 				region := extractRegion(lines, start, lastSignal+2)
 
 				if len(region) > 0 {
@@ -181,7 +181,7 @@ func findTransactionRegions(lines []string) [][]string {
 		}
 	}
 
-	if start != -1 && signalCount >= 2 {
+	if start != -1 && signalCount >= 1 {
 		end := min(len(lines), lastSignal+3)
 
 		region := extractRegion(lines, start, end)
