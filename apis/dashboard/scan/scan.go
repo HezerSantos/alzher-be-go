@@ -317,6 +317,12 @@ func PostDashboardDocument(ginCtx *gin.Context) {
 		return
 	}
 
+	for _, fileHash := range fileHashes {
+		transactionCacheMu.Lock()
+		delete(transactionCache, fileHash)
+		transactionCacheMu.Unlock()
+	}
+
 	ginCtx.JSON(http.StatusOK, gin.H{
 		"transactions":          transactions,
 		"predictedTransactions": predictedTransactions,
