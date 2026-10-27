@@ -135,15 +135,21 @@ func NormalizeStatementText(input string) string {
 }
 
 func extractEmbeddedTransactionRows(line string) []string {
-	var transactions []string
+	line = strings.TrimSpace(line)
 
+	// Standalone transaction rows are already handled by
+	// findTransactionRegions. Do not extract them a second time.
+	if transactionRowRe.MatchString(line) ||
+		transactionRowWithTwoDatesRe.MatchString(line) {
+		return nil
+	}
+
+	var transactions []string
 	dates := dateRe.FindAllStringIndex(line, -1)
 
 	for i, date := range dates {
-		// A transaction may begin after unrelated text on the same line.
 		candidate := strings.TrimSpace(line[date[0]:])
 
-		// Evaluate each date-delimited segment separately.
 		if i+1 < len(dates) {
 			candidate = strings.TrimSpace(line[date[0]:dates[i+1][0]])
 		}
